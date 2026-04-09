@@ -1,0 +1,27 @@
+{
+  "name": "pgnlib",
+  "version-semver": "0.1.0",
+  "dependencies": [
+    {
+      "name": "lexy",
+      "version>=": "2022.12.1"
+    },
+    {
+      "name": "tl-expected",
+      "version>=": "1.1.0"
+    }
+  ],
+  "default-features": [],
+  "features": {
+    "test": {
+      "description": "Dependencies for testing",
+      "dependencies": [
+        {
+          "name": "catch2",
+          "version>=": "3.7.1"
+        }
+      ]
+    }
+  },
+  "builtin-baseline": "d7112d1a4fb50410d3639f5f586972591d848beb"
+}

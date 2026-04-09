@@ -1,0 +1,1 @@
+/home/bogdb/src/motif-chess/plans/design.md
