@@ -370,3 +370,121 @@ TEST_CASE("Zukertort vs Steinitz 1886 - NAGs", "[parser][zukertort]")
     REQUIRE(nd1_var.back().nags.size() == 1);
     CHECK(nd1_var.back().nags[0].value == 19);
 }
+
+// ─── game_stream ──────────────────────────────────────────────────────────────
+
+static constexpr std::string_view two_games_pgn = R"([Event "Game 1"]
+[Site "?"][Date "?"][Round "1"]
+[White "A"][Black "B"][Result "1-0"]
+
+1. e4 1-0
+
+[Event "Game 2"]
+[Site "?"][Date "?"][Round "2"]
+[White "C"][Black "D"][Result "0-1"]
+
+1. d4 0-1
+)";
+
+TEST_CASE("game_stream handles CRLF line endings", "[stream]")
+{
+    // Replace every \n with \r\n to simulate a Windows-exported PGN file.
+    std::string crlf;
+    for (char c : two_games_pgn)
+        (c == '\n' ? (crlf += '\r', crlf += '\n') : (crlf += c));
+
+    std::vector<pgn::game> games;
+    for (auto& eg : pgn::game_stream{std::string_view{crlf}}) {
+        REQUIRE(eg.has_value());
+        games.push_back(std::move(*eg));
+    }
+    REQUIRE(games.size() == 2);
+    CHECK(games[0].tags[0].value == "Game 1");
+    CHECK(games[1].tags[0].value == "Game 2");
+}
+
+TEST_CASE("game_stream yields games one at a time from string", "[stream]")
+{
+    std::vector<pgn::game> games;
+    for (auto& eg : pgn::game_stream{two_games_pgn}) {
+        REQUIRE(eg.has_value());
+        games.push_back(std::move(*eg));
+    }
+    REQUIRE(games.size() == 2);
+    CHECK(games[0].tags[0].value == "Game 1");
+    CHECK(games[0].result == pgn::result::white);
+    CHECK(games[1].tags[0].value == "Game 2");
+    CHECK(games[1].result == pgn::result::black);
+}
+
+TEST_CASE("game_stream yields games from file", "[stream]")
+{
+    std::vector<pgn::game> games;
+    for (auto& eg : pgn::game_stream{zukertort_path}) {
+        REQUIRE(eg.has_value());
+        games.push_back(std::move(*eg));
+    }
+    REQUIRE(games.size() == 1);
+    CHECK(games[0].result == pgn::result::black);
+    CHECK(games[0].moves.size() == 76);
+}
+
+TEST_CASE("game_stream reports file_not_found for missing file", "[stream]")
+{
+    std::vector<tl::expected<pgn::game, pgn::parse_error>> items;
+    for (auto& eg : pgn::game_stream{std::filesystem::path{"/nonexistent/game.pgn"}})
+        items.push_back(eg);
+
+    REQUIRE(items.size() == 1);
+    REQUIRE_FALSE(items[0].has_value());
+    CHECK(items[0].error() == pgn::parse_error::file_not_found);
+}
+
+// A PGN missing a result token — clearly malformed, grammar requires one.
+static constexpr std::string_view three_games_bad_middle = R"([Event "Good 1"]
+[Site "?"][Date "?"][Round "1"]
+[White "A"][Black "B"][Result "1-0"]
+
+1. e4 1-0
+
+[Event "Bad — no result token"]
+[Site "?"][Date "?"][Round "2"]
+[White "C"][Black "D"][Result "1-0"]
+
+1. e4 e5
+
+[Event "Good 2"]
+[Site "?"][Date "?"][Round "3"]
+[White "E"][Black "F"][Result "0-1"]
+
+1. d4 0-1
+)";
+
+TEST_CASE("game_stream skips malformed game and continues", "[stream]")
+{
+    std::vector<tl::expected<pgn::game, pgn::parse_error>> items;
+    for (auto& eg : pgn::game_stream{three_games_bad_middle})
+        items.push_back(eg);
+
+    REQUIRE(items.size() == 3);
+    REQUIRE(items[0].has_value());
+    CHECK(items[0]->tags[0].value == "Good 1");
+    REQUIRE_FALSE(items[1].has_value());
+    CHECK(items[1].error() == pgn::parse_error::syntax_error);
+    REQUIRE(items[2].has_value());
+    CHECK(items[2]->tags[0].value == "Good 2");
+}
+
+TEST_CASE("game_stream iterator byte_offset", "[stream]")
+{
+    pgn::game_stream stream{two_games_pgn};
+    auto it = stream.begin();
+
+    CHECK(it.byte_offset() == 0);       // first game starts at byte 0
+
+    ++it;
+    auto off2 = it.byte_offset();
+    CHECK(off2 > 0);
+    CHECK(off2 < two_games_pgn.size());
+    CHECK(two_games_pgn[off2] == '[');  // offset lands on the opening tag bracket
+}
