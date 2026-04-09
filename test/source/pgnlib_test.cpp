@@ -1,4 +1,6 @@
+#include <chrono>
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -203,16 +205,33 @@ TEST_CASE("multiple games in one string", "[parser]")
 TEST_CASE("UTF-8 player names in tags", "[parser]")
 {
     constexpr std::string_view pgn = R"(
-[Event "?"][Site "?"][Date "?"][Round "?"]
-[White "Carlsen, Magnus"][Black "Naka, Hikaru"][Result "1/2-1/2"]
+[Event "?"][Site "Zürich"][Date "?"][Round "?"]
+[White "Capablanca, José Raúl"][Black "Réti, Richard"][Result "1/2-1/2"]
 
 1/2-1/2
 )";
 
     auto result = pgn::parse_string(pgn);
     REQUIRE(result.has_value());
-    CHECK(result->front().tags[4].value == "Carlsen, Magnus");
+    CHECK(result->front().tags[1].value == "Zürich");
+    CHECK(result->front().tags[4].value == "Capablanca, José Raúl");
+    CHECK(result->front().tags[5].value == "Réti, Richard");
     CHECK(result->front().result == pgn::result::draw);
+}
+
+TEST_CASE("backslash-escaped quotes and backslashes in tag values", "[parser]")
+{
+    constexpr std::string_view pgn = R"(
+[Event "He said \"hello\""][Site "C:\\Games\\PGN"][Date "?"][Round "?"]
+[White "?"][Black "?"][Result "*"]
+
+*
+)";
+
+    auto result = pgn::parse_string(pgn);
+    REQUIRE(result.has_value());
+    CHECK(result->front().tags[0].value == "He said \"hello\"");
+    CHECK(result->front().tags[1].value == "C:\\Games\\PGN");
 }
 
 TEST_CASE("file_not_found error on missing file", "[parser]")
@@ -487,4 +506,58 @@ TEST_CASE("game_stream iterator byte_offset", "[stream]")
     CHECK(off2 > 0);
     CHECK(off2 < two_games_pgn.size());
     CHECK(two_games_pgn[off2] == '[');  // offset lands on the opening tag bracket
+}
+
+// ─── 100K-game throughput (design.md: 100K games < 10 s) ─────────────────────
+
+namespace {
+
+std::string generate_synthetic_pgn(int n)
+{
+    std::string out;
+    out.reserve(static_cast<std::size_t>(n) * 130);
+    for (int i = 1; i <= n; ++i) {
+        out += "[Event \"Synthetic\"]\n"
+               "[Site \"?\"]\n"
+               "[Date \"2024.01.01\"]\n"
+               "[Round \"";
+        out += std::to_string(i);
+        out += "\"]\n"
+               "[White \"A\"]\n"
+               "[Black \"B\"]\n"
+               "[Result \"1-0\"]\n"
+               "\n"
+               "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0\n"
+               "\n";
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("100K synthetic games parsed under 10 seconds", "[.][throughput]")
+{
+    static constexpr int num_games = 100'000;
+    auto const pgn = generate_synthetic_pgn(num_games);
+
+    auto const start = std::chrono::steady_clock::now();
+
+    int count = 0;
+    int errors = 0;
+    for (auto& eg : pgn::game_stream{std::string_view{pgn}}) {
+        if (eg.has_value())
+            ++count;
+        else
+            ++errors;
+    }
+
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+    auto const seconds =
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+        / 1000.0;
+
+    INFO("Parsed " << count << " games in " << seconds << " s");
+    CHECK(errors == 0);
+    CHECK(count == num_games);
+    CHECK(seconds < 10.0);
 }
