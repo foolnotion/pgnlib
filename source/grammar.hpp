@@ -37,12 +37,12 @@ struct move_sequence;
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
-// $N  (N = 0..255)
+// $N  (N = 0..255) — lexy rejects values that overflow uint8_t.
 struct nag_rule : lexy::token_production {
     static constexpr auto rule
-        = dsl::lit_c<'$'> >> dsl::integer<int>(dsl::digits<>);
+        = dsl::lit_c<'$'> >> dsl::integer<std::uint8_t>(dsl::digits<>);
     static constexpr auto value
-        = lexy::callback<pgn::nag>([](int n) { return pgn::nag{n}; });
+        = lexy::callback<pgn::nag>([](std::uint8_t n) { return pgn::nag{n}; });
 };
 
 // { comment text }  — nested braces not supported (rare in practice)
@@ -62,12 +62,15 @@ struct tag_key {
     static constexpr auto value = lexy::as_string<std::string>;
 };
 
-// "quoted string value" — backslash-escaped quotes allowed
+// "quoted string value" — backslash-escaped quotes and backslashes allowed.
+// Uses code_point (not ascii::print) so multi-byte UTF-8 names work.
 struct tag_value_str : lexy::token_production {
     static constexpr auto rule = dsl::quoted(
-        dsl::ascii::print,
-        dsl::backslash_escape.capture(dsl::lit_c<'"'>));
-    static constexpr auto value = lexy::as_string<std::string>;
+        dsl::code_point,
+        dsl::backslash_escape
+            .capture(dsl::lit_c<'"'>)
+            .capture(dsl::lit_c<'\\'>));
+    static constexpr auto value = lexy::as_string<std::string, lexy::utf8_encoding>;
 };
 
 // [Key "Value"]
@@ -122,16 +125,11 @@ struct san_move {
 
 struct move_number : lexy::token_production {
     static constexpr auto rule
-        = dsl::capture(dsl::digits<>)
+        = dsl::integer<int>(dsl::digits<>)
         + dsl::lit_c<'.'>
         + dsl::while_(dsl::lit_c<'.'>);
-    static constexpr auto value = lexy::callback<int>([](auto lex) {
-        int n = 0;
-        for (auto c : lex) {
-            n = n * 10 + (c - '0');
-        }
-        return n;
-    });
+    static constexpr auto value = lexy::callback<int>(
+        [](int n) { return n; });
 };
 
 // ─── Result ───────────────────────────────────────────────────────────────────
@@ -242,9 +240,7 @@ struct move_node_rule {
 //
 // Zero or more move nodes, stopping at a result token or closing paren.
 
-static constexpr auto seq_end
-    = dsl::literal_set(LEXY_LIT("1/2-1/2"), LEXY_LIT("1-0"), LEXY_LIT("0-1"),
-                       LEXY_LIT("*"), dsl::lit_c<')'>);
+static constexpr auto seq_end = result_token / dsl::lit_c<')'>;
 
 struct move_sequence {
     static constexpr auto whitespace = pgn::grammar::whitespace;
