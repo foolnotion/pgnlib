@@ -30,6 +30,22 @@ target_compile_definitions(pgnlib_test PRIVATE
 
 catch_discover_tests(pgnlib_test)
 
+# ---- Benchmarks (optional) ----
+
+find_package(nanobench QUIET)
+if(nanobench_FOUND)
+    add_executable(pgnlib_benchmark source/pgnlib_benchmark.cpp)
+    target_link_libraries(
+        pgnlib_benchmark PRIVATE
+        pgnlib::pgnlib
+        nanobench::nanobench
+    )
+    target_compile_features(pgnlib_benchmark PRIVATE cxx_std_20)
+    target_compile_definitions(pgnlib_benchmark PRIVATE
+        PGNLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pgn"
+    )
+endif()
+
 # ---- End-of-file commands ----
 
 add_folders(Test)
