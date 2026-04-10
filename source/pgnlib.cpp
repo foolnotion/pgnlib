@@ -39,8 +39,8 @@ static auto parse_one_game(std::string_view slice)
     -> tl::expected<pgn::game, pgn::parse_error>
 {
     auto in = lexy::string_input<lexy::utf8_encoding>(slice.data(), slice.size());
-    auto result = lexy::parse<pgn::grammar::game_rule>(in, no_stderr_errors);
-    if (!result.has_value())
+    auto result = lexy::parse<pgn::grammar::single_game>(in, no_stderr_errors);
+    if (!result.has_value() || result.error_count() > 0)
         return tl::unexpected(pgn::parse_error::syntax_error);
     return std::move(result).value();
 }
@@ -128,9 +128,18 @@ struct pgn::game_stream::impl {
     {
         std::size_t pos = 0;
         bool in_brace = false;
+        bool in_quote = false;
 
         while (pos < sv.size()) {
             char c = sv[pos];
+
+            // Inside a quoted tag value: skip everything, honour backslash escapes.
+            if (in_quote) {
+                if (c == '\\') { pos += 2; continue; }  // skip escaped char
+                if (c == '"')  { in_quote = false; }
+                ++pos; continue;
+            }
+            if (c == '"') { in_quote = true; ++pos; continue; }
 
             if (in_brace) {
                 if (c == '}') in_brace = false;

@@ -527,20 +527,22 @@ TEST_CASE("parse_string rejects leading garbage", "[parser]")
     CHECK(r.error() == pgn::parse_error::syntax_error);
 }
 
-TEST_CASE("parse_string diagnostics overload captures message, silent overload has no output", "[parser]")
+TEST_CASE("parse_string diagnostics overload captures message on failure", "[parser]")
 {
     std::string diag;
     auto r = pgn::parse_string("garbage", diag);
     REQUIRE_FALSE(r.has_value());
     CHECK(r.error() == pgn::parse_error::syntax_error);
-    CHECK_FALSE(diag.empty());  // lexy wrote something about the parse failure
+    CHECK_FALSE(diag.empty());
     CHECK(diag.find("EOF") != std::string::npos);
+}
 
-    // Silent overload must not touch the string.
-    std::string silent_diag = "unchanged";
-    auto r2 = pgn::parse_string("garbage");
-    (void)r2;
-    CHECK(silent_diag == "unchanged");
+TEST_CASE("parse_string diagnostics overload leaves string untouched on success", "[parser]")
+{
+    std::string diag = "unchanged";
+    auto r = pgn::parse_string(minimal_pgn, diag);
+    REQUIRE(r.has_value());
+    CHECK(diag == "unchanged");  // no diagnostics written for a clean parse
 }
 
 TEST_CASE("parse_string rejects trailing garbage", "[parser]")
