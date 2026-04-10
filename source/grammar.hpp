@@ -270,7 +270,8 @@ struct game_rule {
 struct pgn_file {
     static constexpr auto whitespace = pgn::grammar::whitespace;
     static constexpr auto rule
-        = dsl::opt(dsl::list(dsl::peek(dsl::lit_c<'['>) >> dsl::p<game_rule>));
+        = dsl::opt(dsl::list(dsl::peek(dsl::lit_c<'['>) >> dsl::p<game_rule>))
+        + dsl::eof;
     static constexpr auto value = lexy::as_list<std::vector<pgn::game>>;
 };
 

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iterator>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -21,11 +22,21 @@ enum class parse_error : u8 {
 };
 
 // ── Eager parsers ─────────────────────────────────────────────────────────────
+//
+// The two-argument overloads append human-readable lexy diagnostics to
+// `diagnostics` on failure (and are silent on success).  The single-argument
+// overloads are fully silent — no output is written to stderr or anywhere else.
 
 PGNLIB_EXPORT auto parse_file(std::filesystem::path const& path)
     -> tl::expected<std::vector<game>, parse_error>;
 
+PGNLIB_EXPORT auto parse_file(std::filesystem::path const& path, std::string& diagnostics)
+    -> tl::expected<std::vector<game>, parse_error>;
+
 PGNLIB_EXPORT auto parse_string(std::string_view input)
+    -> tl::expected<std::vector<game>, parse_error>;
+
+PGNLIB_EXPORT auto parse_string(std::string_view input, std::string& diagnostics)
     -> tl::expected<std::vector<game>, parse_error>;
 
 // ── Streaming parser ──────────────────────────────────────────────────────────

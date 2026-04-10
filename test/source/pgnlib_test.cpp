@@ -494,6 +494,62 @@ TEST_CASE("game_stream skips malformed game and continues", "[stream]")
     CHECK(items[2]->tags[0].value == "Good 2");
 }
 
+TEST_CASE("game_stream handles indented % comment between games", "[stream]")
+{
+    // Whitespace-indented % comment in the inter-game gap must not break splitting.
+    constexpr std::string_view pgn = "[Event \"G1\"]\n"
+                                     "[Site \"?\"][Date \"?\"][Round \"1\"]\n"
+                                     "[White \"A\"][Black \"B\"][Result \"1-0\"]\n"
+                                     "\n"
+                                     "1. e4 1-0\n"
+                                     "\n"
+                                     "    % exported by tool\n"
+                                     "[Event \"G2\"]\n"
+                                     "[Site \"?\"][Date \"?\"][Round \"2\"]\n"
+                                     "[White \"C\"][Black \"D\"][Result \"0-1\"]\n"
+                                     "\n"
+                                     "1. d4 0-1\n";
+
+    std::vector<pgn::game> games;
+    for (auto& eg : pgn::game_stream{pgn}) {
+        REQUIRE(eg.has_value());
+        games.push_back(std::move(*eg));
+    }
+    REQUIRE(games.size() == 2);
+    CHECK(games[0].tags[0].value == "G1");
+    CHECK(games[1].tags[0].value == "G2");
+}
+
+TEST_CASE("parse_string rejects leading garbage", "[parser]")
+{
+    auto r = pgn::parse_string("garbage");
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error() == pgn::parse_error::syntax_error);
+}
+
+TEST_CASE("parse_string diagnostics overload captures message, silent overload has no output", "[parser]")
+{
+    std::string diag;
+    auto r = pgn::parse_string("garbage", diag);
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error() == pgn::parse_error::syntax_error);
+    CHECK_FALSE(diag.empty());  // lexy wrote something about the parse failure
+    CHECK(diag.find("EOF") != std::string::npos);
+
+    // Silent overload must not touch the string.
+    std::string silent_diag = "unchanged";
+    auto r2 = pgn::parse_string("garbage");
+    (void)r2;
+    CHECK(silent_diag == "unchanged");
+}
+
+TEST_CASE("parse_string rejects trailing garbage", "[parser]")
+{
+    auto r = pgn::parse_string(std::string(minimal_pgn) + "\ngarbage\n");
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error() == pgn::parse_error::syntax_error);
+}
+
 TEST_CASE("game_stream iterator byte_offset", "[stream]")
 {
     pgn::game_stream stream{two_games_pgn};

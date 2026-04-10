@@ -13,13 +13,33 @@
 #include "grammar.hpp"
 #include "pgnlib/pgnlib.hpp"
 
+// ── Silent error sink ─────────────────────────────────────────────────────────
+//
+// lexy requires a non-void sink return type (validate.hpp static_assert), so
+// lexy::noop cannot be used directly.  This sink counts errors silently.
+
+namespace {
+struct silent_errors {
+    struct sink_t {
+        std::size_t count = 0;
+        using return_type = std::size_t;
+        template <typename Input, typename Reader, typename Tag>
+        void operator()(lexy::error_context<Input> const&,
+                        lexy::error<Reader, Tag> const&) { ++count; }
+        std::size_t finish() && { return count; }
+    };
+    constexpr auto sink() const { return sink_t{}; }
+};
+constexpr silent_errors no_stderr_errors;
+} // namespace
+
 // ── Internal helper ───────────────────────────────────────────────────────────
 
 static auto parse_one_game(std::string_view slice)
     -> tl::expected<pgn::game, pgn::parse_error>
 {
     auto in = lexy::string_input<lexy::utf8_encoding>(slice.data(), slice.size());
-    auto result = lexy::parse<pgn::grammar::game_rule>(in, lexy_ext::report_error);
+    auto result = lexy::parse<pgn::grammar::game_rule>(in, no_stderr_errors);
     if (!result.has_value())
         return tl::unexpected(pgn::parse_error::syntax_error);
     return std::move(result).value();
@@ -34,10 +54,26 @@ auto pgn::parse_file(std::filesystem::path const& path)
     if (!file)
         return tl::unexpected(parse_error::file_not_found);
 
-    auto result = lexy::parse<pgn::grammar::pgn_file>(
-        file.buffer(), lexy_ext::report_error.path(path.c_str()));
+    auto result = lexy::parse<pgn::grammar::pgn_file>(file.buffer(), no_stderr_errors);
 
-    if (!result.has_value())
+    if (!result.has_value() || result.error_count() > 0)
+        return tl::unexpected(parse_error::syntax_error);
+
+    return std::move(result).value();
+}
+
+auto pgn::parse_file(std::filesystem::path const& path, std::string& diagnostics)
+    -> tl::expected<std::vector<pgn::game>, pgn::parse_error>
+{
+    auto file = lexy::read_file<lexy::utf8_encoding>(path.c_str());
+    if (!file)
+        return tl::unexpected(parse_error::file_not_found);
+
+    auto sink = lexy_ext::report_error.path(path.c_str())
+                                      .to(std::back_inserter(diagnostics));
+    auto result = lexy::parse<pgn::grammar::pgn_file>(file.buffer(), sink);
+
+    if (!result.has_value() || result.error_count() > 0)
         return tl::unexpected(parse_error::syntax_error);
 
     return std::move(result).value();
@@ -48,9 +84,23 @@ auto pgn::parse_string(std::string_view input)
 {
     auto in = lexy::string_input<lexy::utf8_encoding>(input.data(), input.size());
 
-    auto result = lexy::parse<pgn::grammar::pgn_file>(in, lexy_ext::report_error);
+    auto result = lexy::parse<pgn::grammar::pgn_file>(in, no_stderr_errors);
 
-    if (!result.has_value())
+    if (!result.has_value() || result.error_count() > 0)
+        return tl::unexpected(parse_error::syntax_error);
+
+    return std::move(result).value();
+}
+
+auto pgn::parse_string(std::string_view input, std::string& diagnostics)
+    -> tl::expected<std::vector<pgn::game>, pgn::parse_error>
+{
+    auto in = lexy::string_input<lexy::utf8_encoding>(input.data(), input.size());
+
+    auto sink = lexy_ext::report_error.to(std::back_inserter(diagnostics));
+    auto result = lexy::parse<pgn::grammar::pgn_file>(in, sink);
+
+    if (!result.has_value() || result.error_count() > 0)
         return tl::unexpected(parse_error::syntax_error);
 
     return std::move(result).value();
@@ -77,27 +127,54 @@ struct pgn::game_stream::impl {
         -> std::pair<std::string_view, std::string_view>
     {
         std::size_t pos = 0;
+        bool in_brace = false;
+
         while (pos < sv.size()) {
-            auto nl = sv.find('\n', pos);
-            if (nl == std::string_view::npos)
-                return {sv, {}};
+            char c = sv[pos];
 
-            // Check for a blank line: \n followed by optional \r then \n
-            std::size_t next = nl + 1;
-            if (next < sv.size() && sv[next] == '\r')
-                ++next;                         // absorb the \r in \r\n\r\n
+            if (in_brace) {
+                if (c == '}') in_brace = false;
+                ++pos; continue;
+            }
+            if (c == '{') { in_brace = true; ++pos; continue; }
 
-            if (next < sv.size() && sv[next] == '\n') {
-                // Blank line confirmed — skip any further blank lines
-                std::size_t rest = next + 1;
-                while (rest < sv.size() && (sv[rest] == '\r' || sv[rest] == '\n'))
-                    ++rest;
-
-                if (rest < sv.size() && sv[rest] == '[')
-                    return {sv.substr(0, next + 1), sv.substr(rest)};
+            // % line comment — skip to end of line
+            if (c == '%') {
+                auto eol = sv.find('\n', pos);
+                if (eol == std::string_view::npos) return {sv, {}};
+                pos = eol + 1; continue;
             }
 
-            pos = nl + 1;
+            if (c == '\n') {
+                // Check for a blank line: \n followed by optional \r then \n
+                std::size_t next = pos + 1;
+                if (next < sv.size() && sv[next] == '\r') ++next;
+
+                if (next < sv.size() && sv[next] == '\n') {
+                    // Blank line confirmed — skip further blank lines
+                    std::size_t rest = next + 1;
+                    while (rest < sv.size() && (sv[rest] == '\r' || sv[rest] == '\n'))
+                        ++rest;
+
+                    // skip any % line comments in the inter-game gap,
+                    // allowing horizontal whitespace before the %
+                    while (rest < sv.size()) {
+                        while (rest < sv.size() && (sv[rest] == ' ' || sv[rest] == '\t'))
+                            ++rest;
+                        if (rest >= sv.size() || sv[rest] != '%') break;
+                        auto eol = sv.find('\n', rest);
+                        if (eol == std::string_view::npos) { rest = sv.size(); break; }
+                        rest = eol + 1;
+                        while (rest < sv.size() && (sv[rest] == '\r' || sv[rest] == '\n'))
+                            ++rest;
+                    }
+
+                    if (rest < sv.size() && sv[rest] == '[')
+                        return {sv.substr(0, next + 1), sv.substr(rest)};
+                }
+            }
+
+            ++pos;
         }
         return {sv, {}};
     }
