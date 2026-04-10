@@ -265,12 +265,25 @@ struct game_rule {
         });
 };
 
+// ─── Single game with EOF (used by game_stream's per-slice parser) ────────────
+//
+// game_rule has no EOF so trailing bytes in a mis-split slice would be silently
+// ignored.  This wrapper enforces full consumption.
+
+struct single_game {
+    static constexpr auto whitespace = pgn::grammar::whitespace;
+    static constexpr auto rule = dsl::p<game_rule> + dsl::eof;
+    static constexpr auto value = lexy::callback<pgn::game>(
+        [](pgn::game g) { return g; });
+};
+
 // ─── PGN file (sequence of games) ─────────────────────────────────────────────
 
 struct pgn_file {
     static constexpr auto whitespace = pgn::grammar::whitespace;
     static constexpr auto rule
-        = dsl::opt(dsl::list(dsl::peek(dsl::lit_c<'['>) >> dsl::p<game_rule>));
+        = dsl::opt(dsl::list(dsl::peek(dsl::lit_c<'['>) >> dsl::p<game_rule>))
+        + dsl::eof;
     static constexpr auto value = lexy::as_list<std::vector<pgn::game>>;
 };
 
