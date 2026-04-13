@@ -82,17 +82,8 @@
             cmakeBuildType = "Release";
 
             buildInputs = with pkgs; [
-              cpptrace
-              fmt
-              gch-small-vector
               lexy
-              libassert
-              libdwarf
-              magic-enum
-              mdspan
               tl-expected
-              unordered_dense
-              zstd
             ];
           };
         };
