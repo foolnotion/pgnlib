@@ -46,7 +46,6 @@
 
             buildInputs = with pkgs; [
               # dev
-              cxxopts
               gdb
               gcc14
               perf
@@ -56,19 +55,8 @@
 
               # deps
               catch2_3
-              cpptrace
-              fmt
-              gch-small-vector
               lexy
-              mdspan
               nanobench
-              libassert
-              libdwarf
-              magic-enum
-              nlohmann_json
-              unordered_dense
-              zstd
-              gtl
               tl-expected
             ];
           };
