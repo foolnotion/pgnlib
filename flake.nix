@@ -44,7 +44,7 @@
               cmake-language-server
             ];
 
-            buildInputs = with pkgs; [
+            propagatedBuildInputs = with pkgs; [
               # dev
               gdb
               gcc14
@@ -69,7 +69,7 @@
 
             cmakeBuildType = "Release";
 
-            buildInputs = with pkgs; [
+            propagatedBuildInputs = with pkgs; [
               lexy
               tl-expected
             ];
