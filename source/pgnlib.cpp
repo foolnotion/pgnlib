@@ -327,7 +327,7 @@ static void iscan_skip_variation(Cptr& p, Cptr end)
         else if (c == '{') { while (p < end && *p != '}') ++p; if (p < end) ++p; }
         else if (c == '"') {
             while (p < end) {
-                if (*p == '\\') { p += 2; continue; }
+                if (*p == '\\') { if (p + 1 < end) { p += 2; } else { p = end; } continue; }
                 if (*p++ == '"') break;
             }
         }
@@ -379,7 +379,7 @@ static bool iscan_parse_tag(Cptr& p, Cptr end,
 
     Cptr vs = p;
     while (p < end) {
-        if (*p == '\\') { p += 2; continue; }  // skip escaped char
+        if (*p == '\\') { if (p + 1 >= end) return false; p += 2; continue; }
         if (*p == '"') break;
         ++p;
     }
@@ -562,13 +562,13 @@ pgn::import_stream::iterator pgn::import_stream::begin()
 }
 
 pgn::import_stream::iterator::reference
-pgn::import_stream::iterator::operator*() const noexcept
+pgn::import_stream::iterator::operator*() noexcept
 {
     return impl_->current;
 }
 
 pgn::import_stream::iterator::pointer
-pgn::import_stream::iterator::operator->() const noexcept
+pgn::import_stream::iterator::operator->() noexcept
 {
     return &impl_->current;
 }

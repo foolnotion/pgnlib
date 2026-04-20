@@ -72,13 +72,13 @@ public:
         using value_type        = tl::expected<import_game, parse_error>;
         using difference_type   = std::ptrdiff_t;
         using iterator_category = std::input_iterator_tag;
-        using pointer           = value_type const*;
-        using reference         = value_type const&;
+        using pointer           = value_type*;
+        using reference         = value_type&;
 
         iterator() = default;
 
-        reference   operator*()  const noexcept;
-        pointer     operator->() const noexcept;
+        reference   operator*()  noexcept;
+        pointer     operator->() noexcept;
         iterator&   operator++();
         void        operator++(int) { ++(*this); }
         bool        operator==(std::default_sentinel_t) const noexcept;
