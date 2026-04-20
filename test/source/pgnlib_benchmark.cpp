@@ -6,6 +6,7 @@
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include <nanobench.h>
 
+#include "pgnlib/import.hpp"
 #include "pgnlib/pgnlib.hpp"
 
 namespace {
@@ -94,13 +95,27 @@ int main()
     auto const pgn_100k = generate_pgn(k100);
 
     nb::Bench{}
+        .title("import_stream")
+        .unit("game")
+        .warmup(10)
+        .minEpochIterations(500)
+        .run("import_stream: zukertort_steinitz_1886 (mainline only)", [&] {
+            for (auto& eg : pgn::import_stream{std::string_view{zukertort}})
+                nb::doNotOptimizeAway(eg.has_value());
+        });
+
+    nb::Bench{}
         .title("throughput")
         .unit("game")
         .batch(k100)
         .warmup(1)
         .minEpochIterations(3)
-        .run("game_stream 100K synthetic games (5 half-moves)", [&] {
+        .run("game_stream  100K synthetic games (5 half-moves)", [&] {
             for (auto& eg : pgn::game_stream{std::string_view{pgn_100k}})
+                nb::doNotOptimizeAway(eg.has_value());
+        })
+        .run("import_stream 100K synthetic games (5 half-moves)", [&] {
+            for (auto& eg : pgn::import_stream{std::string_view{pgn_100k}})
                 nb::doNotOptimizeAway(eg.has_value());
         });
 }

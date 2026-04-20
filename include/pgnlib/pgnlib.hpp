@@ -16,11 +16,6 @@
 
 namespace pgn {
 
-enum class parse_error : u8 {
-    file_not_found,
-    syntax_error,
-};
-
 // ── Eager parsers ─────────────────────────────────────────────────────────────
 //
 // The two-argument overloads append human-readable lexy diagnostics to
