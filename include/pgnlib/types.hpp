@@ -12,6 +12,11 @@ using u8 = std::uint8_t;
 
 enum class result : u8 { white, black, draw, unknown };
 
+enum class parse_error : u8 {
+    file_not_found,
+    syntax_error,
+};
+
 struct nag {
     int value;
 };
