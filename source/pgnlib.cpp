@@ -618,8 +618,8 @@ struct pgn::import_stream::impl
     std::string_view src;
     std::string_view remaining;
     std::istream* input = nullptr;
-    std::string pending;
-    std::size_t pending_offset = 0;
+    std::size_t buffer_offset = 0;
+    std::size_t consumed_prefix = 0;
     std::size_t buffer_size = 0;
     std::size_t current_offset {0};
     tl::expected<import_game, parse_error> current;
@@ -656,9 +656,12 @@ struct pgn::import_stream::impl
 
     void advance_input()
     {
-        owned_buf = std::move(pending);
-        pending.clear();
-        current_offset = pending_offset;
+        if (consumed_prefix > 0U) {
+            owned_buf.erase(0, consumed_prefix);
+            buffer_offset += consumed_prefix;
+            consumed_prefix = 0;
+        }
+        current_offset = buffer_offset;
 
         for (;;) {
             auto pos = owned_buf.find_first_not_of(" \t\r\n");
@@ -670,17 +673,16 @@ struct pgn::import_stream::impl
                 pos = owned_buf.find_first_not_of(" \t\r\n", eol + 1U);
             }
             if (pos != std::string::npos && pos > 0U) {
-                pending_offset += pos;
+                buffer_offset += pos;
                 owned_buf.erase(0, pos);
-                current_offset = pending_offset;
+                current_offset = buffer_offset;
             }
 
             auto const [slice, rest] = pgn_split_game(owned_buf);
             if (!rest.empty()) {
                 auto const rest_offset =
                     static_cast<std::size_t>(rest.data() - owned_buf.data());
-                pending.assign(rest);
-                pending_offset += rest_offset;
+                consumed_prefix = rest_offset;
                 current = iscan_parse_one(slice);
                 return;
             }
@@ -703,6 +705,7 @@ struct pgn::import_stream::impl
                 return;
             }
             current = iscan_parse_one(owned_buf);
+            consumed_prefix = owned_buf.size();
             return;
         }
     }
