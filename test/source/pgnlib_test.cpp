@@ -1,16 +1,18 @@
 #include <chrono>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "pgnlib/pgnlib.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "pgnlib/import.hpp"
-#include "pgnlib/pgnlib.hpp"
 
 // Resolve the test data directory supplied by CMake.
-static const std::filesystem::path test_data_dir{PGNLIB_TEST_DATA_DIR};
+static const std::filesystem::path test_data_dir {PGNLIB_TEST_DATA_DIR};
 
 // Minimal valid game used as a baseline across multiple tests.
 static constexpr std::string_view minimal_pgn = R"(
@@ -55,22 +57,23 @@ TEST_CASE("move numbers are parsed", "[parser]")
 
 TEST_CASE("result tokens", "[parser]")
 {
-    auto check = [](std::string_view suffix, pgn::result expected) {
+    auto check = [](std::string_view suffix, pgn::result expected)
+    {
         auto pgn = std::string(R"([Event "?"][Site "?"][Date "?"][Round "?"])"
                                R"([White "?"][Black "?"][Result ")");
         pgn += suffix;
         pgn += "\"]\n\n";
         pgn += suffix;
         pgn += "\n";
-        return pgn::parse_string(pgn).transform([expected](auto games) {
-            return games.front().result == expected;
-        });
+        return pgn::parse_string(pgn).transform(
+            [expected](auto games)
+            { return games.front().result == expected; });
     };
 
-    CHECK(check("1-0",     pgn::result::white).value_or(false));
-    CHECK(check("0-1",     pgn::result::black).value_or(false));
+    CHECK(check("1-0", pgn::result::white).value_or(false));
+    CHECK(check("0-1", pgn::result::black).value_or(false));
     CHECK(check("1/2-1/2", pgn::result::draw).value_or(false));
-    CHECK(check("*",       pgn::result::unknown).value_or(false));
+    CHECK(check("*", pgn::result::unknown).value_or(false));
 }
 
 TEST_CASE("comment is captured", "[parser]")
@@ -141,9 +144,11 @@ TEST_CASE("deeply nested variations (depth >= 10)", "[parser]")
     pgn += R"([Event "?"][Site "?"][Date "?"][Round "?"])";
     pgn += R"([White "?"][Black "?"][Result "*"])";
     pgn += "\n\n1. e4 ";
-    for (int i = 0; i < 10; ++i) pgn += "(1. d4 ";
+    for (int i = 0; i < 10; ++i)
+        pgn += "(1. d4 ";
     pgn += "e5 ";
-    for (int i = 0; i < 10; ++i) pgn += ")";
+    for (int i = 0; i < 10; ++i)
+        pgn += ")";
     pgn += " *\n";
 
     auto result = pgn::parse_string(pgn);
@@ -242,12 +247,15 @@ TEST_CASE("file_not_found error on missing file", "[parser]")
     CHECK(result.error() == pgn::parse_error::file_not_found);
 }
 
-// ─── Zukertort vs Steinitz, World Championship 1886, game 9 ───────────────────
+// ─── Zukertort vs Steinitz, World Championship 1886, game 9
+// ───────────────────
 //
 // 38-move game (76 half-moves) with comments, NAGs ($19), variations nested up
-// to three levels deep, castling (O-O), multi-line comments, and empty comments.
+// to three levels deep, castling (O-O), multi-line comments, and empty
+// comments.
 
-static const auto zukertort_path = test_data_dir / "zukertort_steinitz_1886.pgn";
+static const auto zukertort_path =
+    test_data_dir / "zukertort_steinitz_1886.pgn";
 
 TEST_CASE("Zukertort vs Steinitz 1886 - metadata", "[parser][zukertort]")
 {
@@ -278,19 +286,19 @@ TEST_CASE("Zukertort vs Steinitz 1886 - move sequence", "[parser][zukertort]")
 
     CHECK(moves[0].number == 1);
     CHECK(moves[0].san == "d4");
-    CHECK(moves[1].number == 0);   // black reply carries no move number token
+    CHECK(moves[1].number == 0);  // black reply carries no move number token
     CHECK(moves[1].san == "d5");
     CHECK(moves[2].number == 2);
     CHECK(moves[2].san == "c4");
 
-    CHECK(moves[14].san == "O-O"); // 8.O-O
-    CHECK(moves[15].san == "O-O"); // 8...O-O
+    CHECK(moves[14].san == "O-O");  // 8.O-O
+    CHECK(moves[15].san == "O-O");  // 8...O-O
 
     CHECK(moves[20].san == "Bf4");
     CHECK(moves[21].san == "Nbd5");
-    CHECK(moves[21].number == 11); // parsed from "11..."
+    CHECK(moves[21].number == 11);  // parsed from "11..."
 
-    CHECK(moves[32].number == 17); // "17.\nBh4" split across a line break
+    CHECK(moves[32].number == 17);  // "17.\nBh4" split across a line break
     CHECK(moves[32].san == "Bh4");
 
     CHECK(moves[74].san == "Rxe4");
@@ -347,9 +355,11 @@ TEST_CASE("Zukertort vs Steinitz 1886 - variations", "[parser][zukertort]")
     REQUIRE(moves[49].variations.size() == 1);
     auto const& fxe5_var = moves[49].variations[0].moves;
     CHECK(fxe5_var[0].san == "fxe5");
-    auto const* rd7 = [&]() -> pgn::move_node const* {
+    auto const* rd7 = [&]() -> pgn::move_node const*
+    {
         for (auto const& mv : fxe5_var)
-            if (mv.san == "Rd7") return &mv;
+            if (mv.san == "Rd7")
+                return &mv;
         return nullptr;
     }();
     REQUIRE(rd7 != nullptr);
@@ -391,7 +401,8 @@ TEST_CASE("Zukertort vs Steinitz 1886 - NAGs", "[parser][zukertort]")
     CHECK(nd1_var.back().nags[0].value == 19);
 }
 
-// ─── game_stream ──────────────────────────────────────────────────────────────
+// ─── game_stream
+// ──────────────────────────────────────────────────────────────
 
 static constexpr std::string_view two_games_pgn = R"([Event "Game 1"]
 [Site "?"][Date "?"][Round "1"]
@@ -414,7 +425,7 @@ TEST_CASE("game_stream handles CRLF line endings", "[stream]")
         (c == '\n' ? (crlf += '\r', crlf += '\n') : (crlf += c));
 
     std::vector<pgn::game> games;
-    for (auto& eg : pgn::game_stream{std::string_view{crlf}}) {
+    for (auto& eg : pgn::game_stream {std::string_view {crlf}}) {
         REQUIRE(eg.has_value());
         games.push_back(std::move(*eg));
     }
@@ -426,7 +437,7 @@ TEST_CASE("game_stream handles CRLF line endings", "[stream]")
 TEST_CASE("game_stream yields games one at a time from string", "[stream]")
 {
     std::vector<pgn::game> games;
-    for (auto& eg : pgn::game_stream{two_games_pgn}) {
+    for (auto& eg : pgn::game_stream {two_games_pgn}) {
         REQUIRE(eg.has_value());
         games.push_back(std::move(*eg));
     }
@@ -440,7 +451,7 @@ TEST_CASE("game_stream yields games one at a time from string", "[stream]")
 TEST_CASE("game_stream yields games from file", "[stream]")
 {
     std::vector<pgn::game> games;
-    for (auto& eg : pgn::game_stream{zukertort_path}) {
+    for (auto& eg : pgn::game_stream {zukertort_path}) {
         REQUIRE(eg.has_value());
         games.push_back(std::move(*eg));
     }
@@ -452,7 +463,8 @@ TEST_CASE("game_stream yields games from file", "[stream]")
 TEST_CASE("game_stream reports file_not_found for missing file", "[stream]")
 {
     std::vector<tl::expected<pgn::game, pgn::parse_error>> items;
-    for (auto& eg : pgn::game_stream{std::filesystem::path{"/nonexistent/game.pgn"}})
+    for (auto& eg :
+         pgn::game_stream {std::filesystem::path {"/nonexistent/game.pgn"}})
         items.push_back(eg);
 
     REQUIRE(items.size() == 1);
@@ -483,7 +495,7 @@ static constexpr std::string_view three_games_bad_middle = R"([Event "Good 1"]
 TEST_CASE("game_stream skips malformed game and continues", "[stream]")
 {
     std::vector<tl::expected<pgn::game, pgn::parse_error>> items;
-    for (auto& eg : pgn::game_stream{three_games_bad_middle})
+    for (auto& eg : pgn::game_stream {three_games_bad_middle})
         items.push_back(eg);
 
     REQUIRE(items.size() == 3);
@@ -497,22 +509,24 @@ TEST_CASE("game_stream skips malformed game and continues", "[stream]")
 
 TEST_CASE("game_stream handles indented % comment between games", "[stream]")
 {
-    // Whitespace-indented % comment in the inter-game gap must not break splitting.
-    constexpr std::string_view pgn = "[Event \"G1\"]\n"
-                                     "[Site \"?\"][Date \"?\"][Round \"1\"]\n"
-                                     "[White \"A\"][Black \"B\"][Result \"1-0\"]\n"
-                                     "\n"
-                                     "1. e4 1-0\n"
-                                     "\n"
-                                     "    % exported by tool\n"
-                                     "[Event \"G2\"]\n"
-                                     "[Site \"?\"][Date \"?\"][Round \"2\"]\n"
-                                     "[White \"C\"][Black \"D\"][Result \"0-1\"]\n"
-                                     "\n"
-                                     "1. d4 0-1\n";
+    // Whitespace-indented % comment in the inter-game gap must not break
+    // splitting.
+    constexpr std::string_view pgn =
+        "[Event \"G1\"]\n"
+        "[Site \"?\"][Date \"?\"][Round \"1\"]\n"
+        "[White \"A\"][Black \"B\"][Result \"1-0\"]\n"
+        "\n"
+        "1. e4 1-0\n"
+        "\n"
+        "    % exported by tool\n"
+        "[Event \"G2\"]\n"
+        "[Site \"?\"][Date \"?\"][Round \"2\"]\n"
+        "[White \"C\"][Black \"D\"][Result \"0-1\"]\n"
+        "\n"
+        "1. d4 0-1\n";
 
     std::vector<pgn::game> games;
-    for (auto& eg : pgn::game_stream{pgn}) {
+    for (auto& eg : pgn::game_stream {pgn}) {
         REQUIRE(eg.has_value());
         games.push_back(std::move(*eg));
     }
@@ -528,7 +542,8 @@ TEST_CASE("parse_string rejects leading garbage", "[parser]")
     CHECK(r.error() == pgn::parse_error::syntax_error);
 }
 
-TEST_CASE("parse_string diagnostics overload captures message on failure", "[parser]")
+TEST_CASE("parse_string diagnostics overload captures message on failure",
+          "[parser]")
 {
     std::string diag;
     auto r = pgn::parse_string("garbage", diag);
@@ -538,7 +553,9 @@ TEST_CASE("parse_string diagnostics overload captures message on failure", "[par
     CHECK(diag.find("EOF") != std::string::npos);
 }
 
-TEST_CASE("parse_string diagnostics overload leaves string untouched on success", "[parser]")
+TEST_CASE(
+    "parse_string diagnostics overload leaves string untouched on success",
+    "[parser]")
 {
     std::string diag = "unchanged";
     auto r = pgn::parse_string(minimal_pgn, diag);
@@ -555,77 +572,82 @@ TEST_CASE("parse_string rejects trailing garbage", "[parser]")
 
 TEST_CASE("game_stream iterator byte_offset", "[stream]")
 {
-    pgn::game_stream stream{two_games_pgn};
+    pgn::game_stream stream {two_games_pgn};
     auto it = stream.begin();
 
-    CHECK(it.byte_offset() == 0);       // first game starts at byte 0
+    CHECK(it.byte_offset() == 0);  // first game starts at byte 0
 
     ++it;
     auto off2 = it.byte_offset();
     CHECK(off2 > 0);
     CHECK(off2 < two_games_pgn.size());
-    CHECK(two_games_pgn[off2] == '[');  // offset lands on the opening tag bracket
+    CHECK(two_games_pgn[off2]
+          == '[');  // offset lands on the opening tag bracket
 }
 
 // ─── 100K-game throughput (design.md: 100K games < 10 s) ─────────────────────
 
-namespace {
+namespace
+{
 
 std::string generate_synthetic_pgn(int n)
 {
     std::string out;
     out.reserve(static_cast<std::size_t>(n) * 130);
     for (int i = 1; i <= n; ++i) {
-        out += "[Event \"Synthetic\"]\n"
-               "[Site \"?\"]\n"
-               "[Date \"2024.01.01\"]\n"
-               "[Round \"";
+        out +=
+            "[Event \"Synthetic\"]\n"
+            "[Site \"?\"]\n"
+            "[Date \"2024.01.01\"]\n"
+            "[Round \"";
         out += std::to_string(i);
-        out += "\"]\n"
-               "[White \"A\"]\n"
-               "[Black \"B\"]\n"
-               "[Result \"1-0\"]\n"
-               "\n"
-               "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0\n"
-               "\n";
+        out +=
+            "\"]\n"
+            "[White \"A\"]\n"
+            "[Black \"B\"]\n"
+            "[Result \"1-0\"]\n"
+            "\n"
+            "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0\n"
+            "\n";
     }
     return out;
 }
 
-} // namespace
+}  // namespace
 
-// ─── import_stream ────────────────────────────────────────────────────────────
+// ─── import_stream
+// ────────────────────────────────────────────────────────────
 
 TEST_CASE("import_stream - tags as string_views", "[import]")
 {
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{minimal_pgn}) {
+    for (auto& eg : pgn::import_stream {minimal_pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
     REQUIRE(game.tags.size() == 7);
-    CHECK(game.tags[0].key   == "Event");
+    CHECK(game.tags[0].key == "Event");
     CHECK(game.tags[0].value == "Test");
-    CHECK(game.tags[4].key   == "White");
+    CHECK(game.tags[4].key == "White");
     CHECK(game.tags[4].value == "Smith, John");
-    CHECK(game.tags[5].key   == "Black");
+    CHECK(game.tags[5].key == "Black");
     CHECK(game.tags[5].value == "Jones, Bob");
 }
 
 TEST_CASE("import_stream - moves as string_views", "[import]")
 {
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{minimal_pgn}) {
+    for (auto& eg : pgn::import_stream {minimal_pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
     REQUIRE(game.moves.size() == 5);
     CHECK(game.moves[0].number == 1);
-    CHECK(game.moves[0].san   == "e4");
-    CHECK(game.moves[1].number == 0);   // black reply — no token
-    CHECK(game.moves[1].san   == "e5");
+    CHECK(game.moves[0].san == "e4");
+    CHECK(game.moves[1].number == 0);  // black reply — no token
+    CHECK(game.moves[1].san == "e5");
     CHECK(game.moves[2].number == 2);
-    CHECK(game.moves[2].san   == "Nf3");
+    CHECK(game.moves[2].san == "Nf3");
     CHECK(game.result == pgn::result::white);
 }
 
@@ -638,7 +660,7 @@ TEST_CASE("import_stream - skips comments", "[import]")
 1. e4 { White opens with pawn to e4. } e5 1-0
 )";
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{pgn}) {
+    for (auto& eg : pgn::import_stream {pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
@@ -656,7 +678,7 @@ TEST_CASE("import_stream - skips NAGs", "[import]")
 1. e4 $1 e5 $2 1-0
 )";
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{pgn}) {
+    for (auto& eg : pgn::import_stream {pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
@@ -674,7 +696,7 @@ TEST_CASE("import_stream - skips variations, keeps mainline", "[import]")
 1. e4 e5 2. Nf3 (2. d4 exd4 (2... cxd4 3. Qxd4)) Nc6 1-0
 )";
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{pgn}) {
+    for (auto& eg : pgn::import_stream {pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
@@ -694,7 +716,7 @@ TEST_CASE("import_stream - game with no moves", "[import]")
 *
 )";
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{pgn}) {
+    for (auto& eg : pgn::import_stream {pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
@@ -705,7 +727,7 @@ TEST_CASE("import_stream - game with no moves", "[import]")
 TEST_CASE("import_stream - multiple games", "[import]")
 {
     std::vector<pgn::import_game> games;
-    for (auto& eg : pgn::import_stream{two_games_pgn}) {
+    for (auto& eg : pgn::import_stream {two_games_pgn}) {
         REQUIRE(eg.has_value());
         games.push_back(std::move(*eg));
     }
@@ -718,10 +740,31 @@ TEST_CASE("import_stream - multiple games", "[import]")
     CHECK(games[0].moves[0].san == "e4");
 }
 
+TEST_CASE("import_stream - bounded istream input", "[import]")
+{
+    std::istringstream input {std::string {two_games_pgn}};
+    pgn::import_stream stream {input, 7U};
+    auto it = stream.begin();
+
+    REQUIRE(it != stream.end());
+    REQUIRE(it->has_value());
+    CHECK(it->value().tags[0].value == "Game 1");
+    CHECK(it.byte_offset() == 0U);
+
+    ++it;
+    REQUIRE(it != stream.end());
+    REQUIRE(it->has_value());
+    CHECK(it->value().tags[0].value == "Game 2");
+    CHECK(it.byte_offset() == two_games_pgn.find("[Event \"Game 2\"]"));
+
+    ++it;
+    CHECK(it == stream.end());
+}
+
 TEST_CASE("import_stream - malformed game recovery", "[import]")
 {
     std::vector<tl::expected<pgn::import_game, pgn::parse_error>> items;
-    for (auto& eg : pgn::import_stream{three_games_bad_middle})
+    for (auto& eg : pgn::import_stream {three_games_bad_middle})
         items.push_back(eg);
 
     REQUIRE(items.size() == 3);
@@ -736,7 +779,7 @@ TEST_CASE("import_stream - malformed game recovery", "[import]")
 TEST_CASE("import_stream - file loading", "[import]")
 {
     std::vector<pgn::import_game> games;
-    for (auto& eg : pgn::import_stream{zukertort_path}) {
+    for (auto& eg : pgn::import_stream {zukertort_path}) {
         REQUIRE(eg.has_value());
         games.push_back(std::move(*eg));
     }
@@ -749,7 +792,7 @@ TEST_CASE("import_stream - file loading", "[import]")
     CHECK(g.moves[14].san == "O-O");
     CHECK(g.moves[15].san == "O-O");
     REQUIRE(g.tags.size() == 9);
-    CHECK(g.tags[4].key   == "White");
+    CHECK(g.tags[4].key == "White");
     CHECK(g.tags[4].value == "Zukertort, Johannes");
 }
 
@@ -762,7 +805,7 @@ TEST_CASE("import_stream - null move --", "[import]")
 1. -- e5 *
 )";
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{pgn}) {
+    for (auto& eg : pgn::import_stream {pgn}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
@@ -772,32 +815,33 @@ TEST_CASE("import_stream - null move --", "[import]")
 
 TEST_CASE("import_stream - string_views point into source buffer", "[import]")
 {
-    // Verify that string_views from import_game are actual views into the source,
-    // not copies, by checking pointer containment.
-    std::string src{minimal_pgn};
+    // Verify that string_views from import_game are actual views into the
+    // source, not copies, by checking pointer containment.
+    std::string src {minimal_pgn};
     pgn::import_game game;
-    for (auto& eg : pgn::import_stream{std::string_view{src}}) {
+    for (auto& eg : pgn::import_stream {std::string_view {src}}) {
         REQUIRE(eg.has_value());
         game = std::move(*eg);
     }
     const char* src_begin = src.data();
-    const char* src_end   = src_begin + src.size();
+    const char* src_end = src_begin + src.size();
     for (auto const& t : game.tags) {
-        CHECK(t.key.data()   >= src_begin);
-        CHECK(t.key.data()   <  src_end);
+        CHECK(t.key.data() >= src_begin);
+        CHECK(t.key.data() < src_end);
         CHECK(t.value.data() >= src_begin);
-        CHECK(t.value.data() <  src_end);
+        CHECK(t.value.data() < src_end);
     }
     for (auto const& m : game.moves) {
         CHECK(m.san.data() >= src_begin);
-        CHECK(m.san.data() <  src_end);
+        CHECK(m.san.data() < src_end);
     }
 }
 
 TEST_CASE("import_stream - file_not_found", "[import]")
 {
     std::vector<tl::expected<pgn::import_game, pgn::parse_error>> items;
-    for (auto& eg : pgn::import_stream{std::filesystem::path{"/nonexistent/game.pgn"}})
+    for (auto& eg :
+         pgn::import_stream {std::filesystem::path {"/nonexistent/game.pgn"}})
         items.push_back(eg);
     REQUIRE(items.size() == 1);
     REQUIRE_FALSE(items[0].has_value());
@@ -806,22 +850,24 @@ TEST_CASE("import_stream - file_not_found", "[import]")
 
 TEST_CASE("import_stream - result tokens", "[import]")
 {
-    auto check = [](std::string_view suffix, pgn::result expected) {
+    auto check = [](std::string_view suffix, pgn::result expected)
+    {
         auto src = std::string(R"([Event "?"][Site "?"][Date "?"][Round "?"])"
                                R"([White "?"][Black "?"][Result ")");
         src += suffix;
         src += "\"]\n\n";
         src += suffix;
         src += "\n";
-        for (auto& eg : pgn::import_stream{std::string_view{src}}) {
-            if (eg.has_value()) return eg->result == expected;
+        for (auto& eg : pgn::import_stream {std::string_view {src}}) {
+            if (eg.has_value())
+                return eg->result == expected;
         }
         return false;
     };
-    CHECK(check("1-0",     pgn::result::white));
-    CHECK(check("0-1",     pgn::result::black));
+    CHECK(check("1-0", pgn::result::white));
+    CHECK(check("0-1", pgn::result::black));
     CHECK(check("1/2-1/2", pgn::result::draw));
-    CHECK(check("*",       pgn::result::unknown));
+    CHECK(check("*", pgn::result::unknown));
 }
 
 TEST_CASE("100K synthetic games parsed under 10 seconds", "[.][throughput]")
@@ -833,7 +879,7 @@ TEST_CASE("100K synthetic games parsed under 10 seconds", "[.][throughput]")
 
     int count = 0;
     int errors = 0;
-    for (auto& eg : pgn::game_stream{std::string_view{pgn}}) {
+    for (auto& eg : pgn::game_stream {std::string_view {pgn}}) {
         if (eg.has_value())
             ++count;
         else

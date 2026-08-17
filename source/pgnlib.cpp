@@ -1,9 +1,12 @@
 #include <filesystem>
 #include <fstream>
+#include <istream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "pgnlib/pgnlib.hpp"
 
 #include <lexy/action/parse.hpp>
 #include <lexy/input/file.hpp>
@@ -12,41 +15,50 @@
 
 #include "grammar.hpp"
 #include "pgnlib/import.hpp"
-#include "pgnlib/pgnlib.hpp"
 
-// ── Silent error sink ─────────────────────────────────────────────────────────
+// ── Silent error sink
+// ─────────────────────────────────────────────────────────
 //
 // lexy requires a non-void sink return type (validate.hpp static_assert), so
 // lexy::noop cannot be used directly.  This sink counts errors silently.
 
-namespace {
-struct silent_errors {
-    struct sink_t {
+namespace
+{
+struct silent_errors
+{
+    struct sink_t
+    {
         std::size_t count = 0;
         using return_type = std::size_t;
-        template <typename Input, typename Reader, typename Tag>
+        template<typename Input, typename Reader, typename Tag>
         void operator()(lexy::error_context<Input> const&,
-                        lexy::error<Reader, Tag> const&) { ++count; }
+                        lexy::error<Reader, Tag> const&)
+        {
+            ++count;
+        }
         std::size_t finish() && { return count; }
     };
-    constexpr auto sink() const { return sink_t{}; }
+    constexpr auto sink() const { return sink_t {}; }
 };
 constexpr silent_errors no_stderr_errors;
-} // namespace
+}  // namespace
 
-// ── Internal helper ───────────────────────────────────────────────────────────
+// ── Internal helper
+// ───────────────────────────────────────────────────────────
 
 static auto parse_one_game(std::string_view slice)
     -> tl::expected<pgn::game, pgn::parse_error>
 {
-    auto in = lexy::string_input<lexy::utf8_encoding>(slice.data(), slice.size());
+    auto in =
+        lexy::string_input<lexy::utf8_encoding>(slice.data(), slice.size());
     auto result = lexy::parse<pgn::grammar::single_game>(in, no_stderr_errors);
     if (!result.has_value() || result.error_count() > 0)
         return tl::unexpected(pgn::parse_error::syntax_error);
     return std::move(result).value();
 }
 
-// ── Eager parsers ─────────────────────────────────────────────────────────────
+// ── Eager parsers
+// ─────────────────────────────────────────────────────────────
 
 auto pgn::parse_file(std::filesystem::path const& path)
     -> tl::expected<std::vector<pgn::game>, pgn::parse_error>
@@ -55,7 +67,8 @@ auto pgn::parse_file(std::filesystem::path const& path)
     if (!file)
         return tl::unexpected(parse_error::file_not_found);
 
-    auto result = lexy::parse<pgn::grammar::pgn_file>(file.buffer(), no_stderr_errors);
+    auto result =
+        lexy::parse<pgn::grammar::pgn_file>(file.buffer(), no_stderr_errors);
 
     if (!result.has_value() || result.error_count() > 0)
         return tl::unexpected(parse_error::syntax_error);
@@ -63,7 +76,8 @@ auto pgn::parse_file(std::filesystem::path const& path)
     return std::move(result).value();
 }
 
-auto pgn::parse_file(std::filesystem::path const& path, std::string& diagnostics)
+auto pgn::parse_file(std::filesystem::path const& path,
+                     std::string& diagnostics)
     -> tl::expected<std::vector<pgn::game>, pgn::parse_error>
 {
     auto file = lexy::read_file<lexy::utf8_encoding>(path.c_str());
@@ -71,7 +85,7 @@ auto pgn::parse_file(std::filesystem::path const& path, std::string& diagnostics
         return tl::unexpected(parse_error::file_not_found);
 
     auto sink = lexy_ext::report_error.path(path.c_str())
-                                      .to(std::back_inserter(diagnostics));
+                    .to(std::back_inserter(diagnostics));
     auto result = lexy::parse<pgn::grammar::pgn_file>(file.buffer(), sink);
 
     if (!result.has_value() || result.error_count() > 0)
@@ -83,7 +97,8 @@ auto pgn::parse_file(std::filesystem::path const& path, std::string& diagnostics
 auto pgn::parse_string(std::string_view input)
     -> tl::expected<std::vector<pgn::game>, pgn::parse_error>
 {
-    auto in = lexy::string_input<lexy::utf8_encoding>(input.data(), input.size());
+    auto in =
+        lexy::string_input<lexy::utf8_encoding>(input.data(), input.size());
 
     auto result = lexy::parse<pgn::grammar::pgn_file>(in, no_stderr_errors);
 
@@ -96,7 +111,8 @@ auto pgn::parse_string(std::string_view input)
 auto pgn::parse_string(std::string_view input, std::string& diagnostics)
     -> tl::expected<std::vector<pgn::game>, pgn::parse_error>
 {
-    auto in = lexy::string_input<lexy::utf8_encoding>(input.data(), input.size());
+    auto in =
+        lexy::string_input<lexy::utf8_encoding>(input.data(), input.size());
 
     auto sink = lexy_ext::report_error.to(std::back_inserter(diagnostics));
     auto result = lexy::parse<pgn::grammar::pgn_file>(in, sink);
@@ -107,7 +123,8 @@ auto pgn::parse_string(std::string_view input, std::string& diagnostics)
     return std::move(result).value();
 }
 
-// ── Game-boundary splitter (shared by game_stream and import_stream) ──────────
+// ── Game-boundary splitter (shared by game_stream and import_stream)
+// ──────────
 //
 // Returns { game_slice, rest_starting_at_next_'[' }.
 //
@@ -125,41 +142,67 @@ static auto pgn_split_game(std::string_view sv)
         char c = sv[pos];
 
         if (in_quote) {
-            if (c == '\\') { pos += 2; continue; }
-            if (c == '"')  { in_quote = false; }
-            ++pos; continue;
+            if (c == '\\') {
+                pos += 2;
+                continue;
+            }
+            if (c == '"') {
+                in_quote = false;
+            }
+            ++pos;
+            continue;
         }
-        if (c == '"') { in_quote = true; ++pos; continue; }
+        if (c == '"') {
+            in_quote = true;
+            ++pos;
+            continue;
+        }
 
         if (in_brace) {
-            if (c == '}') in_brace = false;
-            ++pos; continue;
+            if (c == '}')
+                in_brace = false;
+            ++pos;
+            continue;
         }
-        if (c == '{') { in_brace = true; ++pos; continue; }
+        if (c == '{') {
+            in_brace = true;
+            ++pos;
+            continue;
+        }
 
         if (c == '%') {
             auto eol = sv.find('\n', pos);
-            if (eol == std::string_view::npos) return {sv, {}};
-            pos = eol + 1; continue;
+            if (eol == std::string_view::npos)
+                return {sv, {}};
+            pos = eol + 1;
+            continue;
         }
 
         if (c == '\n') {
             std::size_t next = pos + 1;
-            if (next < sv.size() && sv[next] == '\r') ++next;
+            if (next < sv.size() && sv[next] == '\r')
+                ++next;
 
             if (next < sv.size() && sv[next] == '\n') {
                 std::size_t rest = next + 1;
-                while (rest < sv.size() && (sv[rest] == '\r' || sv[rest] == '\n'))
+                while (rest < sv.size()
+                       && (sv[rest] == '\r' || sv[rest] == '\n'))
                     ++rest;
 
                 while (rest < sv.size()) {
-                    while (rest < sv.size() && (sv[rest] == ' ' || sv[rest] == '\t'))
+                    while (rest < sv.size()
+                           && (sv[rest] == ' ' || sv[rest] == '\t'))
                         ++rest;
-                    if (rest >= sv.size() || sv[rest] != '%') break;
+                    if (rest >= sv.size() || sv[rest] != '%')
+                        break;
                     auto eol = sv.find('\n', rest);
-                    if (eol == std::string_view::npos) { rest = sv.size(); break; }
+                    if (eol == std::string_view::npos) {
+                        rest = sv.size();
+                        break;
+                    }
                     rest = eol + 1;
-                    while (rest < sv.size() && (sv[rest] == '\r' || sv[rest] == '\n'))
+                    while (rest < sv.size()
+                           && (sv[rest] == '\r' || sv[rest] == '\n'))
                         ++rest;
                 }
 
@@ -173,22 +216,28 @@ static auto pgn_split_game(std::string_view sv)
     return {sv, {}};
 }
 
-// ── game_stream ───────────────────────────────────────────────────────────────
+// ── game_stream
+// ───────────────────────────────────────────────────────────────
 
-struct pgn::game_stream::impl {
-    std::string      owned_buf;
+struct pgn::game_stream::impl
+{
+    std::string owned_buf;
     std::string_view src;
     std::string_view remaining;
-    std::size_t      current_offset{0};
+    std::size_t current_offset {0};
     tl::expected<game, parse_error> current;
     bool done = false;
 
-    void advance() {
+    void advance()
+    {
         // skip leading whitespace, blank lines, and %-line comments
         auto pos = remaining.find_first_not_of(" \t\r\n");
         while (pos != std::string_view::npos && remaining[pos] == '%') {
             auto eol = remaining.find('\n', pos);
-            if (eol == std::string_view::npos) { done = true; return; }
+            if (eol == std::string_view::npos) {
+                done = true;
+                return;
+            }
             remaining = remaining.substr(eol + 1);
             pos = remaining.find_first_not_of(" \t\r\n");
         }
@@ -196,16 +245,18 @@ struct pgn::game_stream::impl {
             done = true;
             return;
         }
-        remaining      = remaining.substr(pos);
-        current_offset = static_cast<std::size_t>(remaining.data() - src.data());
+        remaining = remaining.substr(pos);
+        current_offset =
+            static_cast<std::size_t>(remaining.data() - src.data());
 
         auto [slice, rest] = pgn_split_game(remaining);
         remaining = rest;
-        current   = parse_one_game(slice);
+        current = parse_one_game(slice);
     }
 };
 
-// ── Constructors / destructor ─────────────────────────────────────────────────
+// ── Constructors / destructor
+// ─────────────────────────────────────────────────
 
 pgn::game_stream::game_stream(std::filesystem::path const& path)
     : impl_(std::make_unique<impl>())
@@ -228,7 +279,7 @@ pgn::game_stream::game_stream(std::filesystem::path const& path)
         impl_->current = tl::unexpected(parse_error::file_not_found);
         return;
     }
-    impl_->src       = impl_->owned_buf;
+    impl_->src = impl_->owned_buf;
     impl_->remaining = impl_->owned_buf;
     impl_->advance();
 }
@@ -236,7 +287,7 @@ pgn::game_stream::game_stream(std::filesystem::path const& path)
 pgn::game_stream::game_stream(std::string_view input)
     : impl_(std::make_unique<impl>())
 {
-    impl_->src       = input;
+    impl_->src = input;
     impl_->remaining = input;
     impl_->advance();
 }
@@ -246,11 +297,12 @@ pgn::game_stream::~game_stream() = default;
 pgn::game_stream::game_stream(game_stream&&) noexcept = default;
 pgn::game_stream& pgn::game_stream::operator=(game_stream&&) noexcept = default;
 
-// ── Iterator ──────────────────────────────────────────────────────────────────
+// ── Iterator
+// ──────────────────────────────────────────────────────────────────
 
 pgn::game_stream::iterator pgn::game_stream::begin()
 {
-    return iterator{impl_.get()};
+    return iterator {impl_.get()};
 }
 
 pgn::game_stream::iterator::reference
@@ -271,7 +323,8 @@ pgn::game_stream::iterator& pgn::game_stream::iterator::operator++()
     return *this;
 }
 
-bool pgn::game_stream::iterator::operator==(std::default_sentinel_t) const noexcept
+bool pgn::game_stream::iterator::operator==(
+    std::default_sentinel_t) const noexcept
 {
     return impl_ == nullptr || impl_->done;
 }
@@ -281,7 +334,8 @@ std::size_t pgn::game_stream::iterator::byte_offset() const noexcept
     return impl_ ? impl_->current_offset : 0;
 }
 
-// ── Import scanner (hand-rolled, zero-allocation for string data) ─────────────
+// ── Import scanner (hand-rolled, zero-allocation for string data)
+// ─────────────
 //
 // Parses a single game slice into a pgn::import_game.  All string_view fields
 // point into the slice (which itself points into the owning buffer).
@@ -292,7 +346,8 @@ std::size_t pgn::game_stream::iterator::byte_offset() const noexcept
 // Tag values are returned as raw bytes between the outer quotes; backslash
 // escape sequences (e.g. \") are NOT unescaped.
 
-namespace {
+namespace
+{
 
 using Cptr = const char*;
 
@@ -302,7 +357,8 @@ static void iscan_skip_ws(Cptr& p, Cptr end)
         while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n'))
             ++p;
         if (p < end && *p == '%') {
-            while (p < end && *p != '\n') ++p;
+            while (p < end && *p != '\n')
+                ++p;
             continue;
         }
         break;
@@ -312,8 +368,10 @@ static void iscan_skip_ws(Cptr& p, Cptr end)
 static void iscan_skip_comment(Cptr& p, Cptr end)
 {
     ++p;  // consume '{'
-    while (p < end && *p != '}') ++p;
-    if (p < end) ++p;  // consume '}'
+    while (p < end && *p != '}')
+        ++p;
+    if (p < end)
+        ++p;  // consume '}'
 }
 
 // Skip ( variation ) with arbitrary nesting.  Also handles { } and " " inside.
@@ -322,13 +380,28 @@ static void iscan_skip_variation(Cptr& p, Cptr end)
     int depth = 0;
     while (p < end) {
         char c = *p++;
-        if      (c == '(') { ++depth; }
-        else if (c == ')') { if (--depth == 0) return; }
-        else if (c == '{') { while (p < end && *p != '}') ++p; if (p < end) ++p; }
-        else if (c == '"') {
+        if (c == '(') {
+            ++depth;
+        } else if (c == ')') {
+            if (--depth == 0)
+                return;
+        } else if (c == '{') {
+            while (p < end && *p != '}')
+                ++p;
+            if (p < end)
+                ++p;
+        } else if (c == '"') {
             while (p < end) {
-                if (*p == '\\') { if (p + 1 < end) { p += 2; } else { p = end; } continue; }
-                if (*p++ == '"') break;
+                if (*p == '\\') {
+                    if (p + 1 < end) {
+                        p += 2;
+                    } else {
+                        p = end;
+                    }
+                    continue;
+                }
+                if (*p++ == '"')
+                    break;
             }
         }
     }
@@ -337,58 +410,82 @@ static void iscan_skip_variation(Cptr& p, Cptr end)
 static void iscan_skip_nag(Cptr& p, Cptr end)
 {
     ++p;  // consume '$'
-    while (p < end && *p >= '0' && *p <= '9') ++p;
+    while (p < end && *p >= '0' && *p <= '9')
+        ++p;
 }
 
 static void iscan_skip_annotations(Cptr& p, Cptr end)
 {
     for (;;) {
         iscan_skip_ws(p, end);
-        if (p >= end) break;
-        if (*p == '{') { iscan_skip_comment(p, end); continue; }
-        if (*p == '$') { iscan_skip_nag(p, end);     continue; }
-        if (*p == '(') { iscan_skip_variation(p, end); continue; }
+        if (p >= end)
+            break;
+        if (*p == '{') {
+            iscan_skip_comment(p, end);
+            continue;
+        }
+        if (*p == '$') {
+            iscan_skip_nag(p, end);
+            continue;
+        }
+        if (*p == '(') {
+            iscan_skip_variation(p, end);
+            continue;
+        }
         break;
     }
 }
 
 // Parse [Key "RawValue"].  Precondition: *p == '['.
 // Returns false on malformed input (p left in indeterminate state on failure).
-static bool iscan_parse_tag(Cptr& p, Cptr end,
-                             std::string_view& key, std::string_view& value)
+static bool iscan_parse_tag(Cptr& p,
+                            Cptr end,
+                            std::string_view& key,
+                            std::string_view& value)
 {
     ++p;  // consume '['
     iscan_skip_ws(p, end);
 
     // Key: [A-Za-z_][A-Za-z0-9_]*
-    auto is_key_head = [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+    auto is_key_head = [](char c)
+    { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'; };
+    auto is_key_tail = [](char c)
+    {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+            || (c >= '0' && c <= '9') || c == '_';
     };
-    auto is_key_tail = [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-               (c >= '0' && c <= '9') || c == '_';
-    };
-    if (p >= end || !is_key_head(*p)) return false;
+    if (p >= end || !is_key_head(*p))
+        return false;
     Cptr ks = p;
-    while (p < end && is_key_tail(*p)) ++p;
+    while (p < end && is_key_tail(*p))
+        ++p;
     key = {ks, static_cast<std::size_t>(p - ks)};
 
     iscan_skip_ws(p, end);
-    if (p >= end || *p != '"') return false;
+    if (p >= end || *p != '"')
+        return false;
     ++p;  // consume opening '"'
 
     Cptr vs = p;
     while (p < end) {
-        if (*p == '\\') { if (p + 1 >= end) return false; p += 2; continue; }
-        if (*p == '"') break;
+        if (*p == '\\') {
+            if (p + 1 >= end)
+                return false;
+            p += 2;
+            continue;
+        }
+        if (*p == '"')
+            break;
         ++p;
     }
-    if (p >= end) return false;
+    if (p >= end)
+        return false;
     value = {vs, static_cast<std::size_t>(p - vs)};
     ++p;  // consume closing '"'
 
     iscan_skip_ws(p, end);
-    if (p >= end || *p != ']') return false;
+    if (p >= end || *p != ']')
+        return false;
     ++p;  // consume ']'
     return true;
 }
@@ -397,12 +494,17 @@ static bool iscan_parse_tag(Cptr& p, Cptr end,
 // Restores p if the digits are not followed by '.'.
 static int iscan_maybe_movenum(Cptr& p, Cptr end)
 {
-    if (p >= end || *p < '0' || *p > '9') return 0;
+    if (p >= end || *p < '0' || *p > '9')
+        return 0;
     Cptr save = p;
     int n = 0;
-    while (p < end && *p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); ++p; }
+    while (p < end && *p >= '0' && *p <= '9') {
+        n = n * 10 + (*p - '0');
+        ++p;
+    }
     if (p < end && *p == '.') {
-        while (p < end && *p == '.') ++p;
+        while (p < end && *p == '.')
+            ++p;
         return n;
     }
     p = save;
@@ -414,21 +516,23 @@ static std::string_view iscan_parse_san(Cptr& p, Cptr end)
 {
     // Null move "--"
     if (static_cast<std::size_t>(end - p) >= 2 && p[0] == '-' && p[1] == '-') {
-        std::string_view sv{p, 2};
+        std::string_view sv {p, 2};
         p += 2;
         return sv;
     }
-    auto is_alpha = [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    auto is_alpha = [](char c)
+    { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); };
+    auto is_san_cont = [](char c)
+    {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+            || (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '#'
+            || c == '=' || c == '!' || c == '?';
     };
-    auto is_san_cont = [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-               (c >= '0' && c <= '9') ||
-               c == '-' || c == '+' || c == '#' || c == '=' || c == '!' || c == '?';
-    };
-    if (p >= end || !is_alpha(*p)) return {};
+    if (p >= end || !is_alpha(*p))
+        return {};
     Cptr s = p++;
-    while (p < end && is_san_cont(*p)) ++p;
+    while (p < end && is_san_cont(*p))
+        ++p;
     return {s, static_cast<std::size_t>(p - s)};
 }
 
@@ -437,19 +541,33 @@ static std::string_view iscan_parse_san(Cptr& p, Cptr end)
 static std::optional<pgn::result> iscan_try_result(Cptr& p, Cptr end)
 {
     auto rem = static_cast<std::size_t>(end - p);
-    if (rem == 0) return std::nullopt;
-    if (*p == '*') { ++p; return pgn::result::unknown; }
-    if (rem >= 3 && p[0] == '1' && p[1] == '-' && p[2] == '0') { p += 3; return pgn::result::white; }
-    if (rem >= 3 && p[0] == '0' && p[1] == '-' && p[2] == '1') { p += 3; return pgn::result::black; }
-    if (rem >= 7 && p[0] == '1' && p[1] == '/' &&
-        std::string_view{p, 7} == "1/2-1/2") { p += 7; return pgn::result::draw; }
+    if (rem == 0)
+        return std::nullopt;
+    if (*p == '*') {
+        ++p;
+        return pgn::result::unknown;
+    }
+    if (rem >= 3 && p[0] == '1' && p[1] == '-' && p[2] == '0') {
+        p += 3;
+        return pgn::result::white;
+    }
+    if (rem >= 3 && p[0] == '0' && p[1] == '-' && p[2] == '1') {
+        p += 3;
+        return pgn::result::black;
+    }
+    if (rem >= 7 && p[0] == '1' && p[1] == '/'
+        && std::string_view {p, 7} == "1/2-1/2")
+    {
+        p += 7;
+        return pgn::result::draw;
+    }
     return std::nullopt;
 }
 
 static auto iscan_parse_one(std::string_view slice)
     -> tl::expected<pgn::import_game, pgn::parse_error>
 {
-    Cptr p   = slice.data();
+    Cptr p = slice.data();
     Cptr end = p + slice.size();
 
     pgn::import_game game;
@@ -489,23 +607,37 @@ static auto iscan_parse_one(std::string_view slice)
     }
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
-// ── import_stream ─────────────────────────────────────────────────────────────
+// ── import_stream
+// ─────────────────────────────────────────────────────────────
 
-struct pgn::import_stream::impl {
-    std::string      owned_buf;
+struct pgn::import_stream::impl
+{
+    std::string owned_buf;
     std::string_view src;
     std::string_view remaining;
-    std::size_t      current_offset{0};
+    std::istream* input = nullptr;
+    std::string pending;
+    std::size_t pending_offset = 0;
+    std::size_t buffer_size = 0;
+    std::size_t current_offset {0};
     tl::expected<import_game, parse_error> current;
     bool done = false;
 
-    void advance() {
+    void advance()
+    {
+        if (input != nullptr) {
+            advance_input();
+            return;
+        }
         auto pos = remaining.find_first_not_of(" \t\r\n");
         while (pos != std::string_view::npos && remaining[pos] == '%') {
             auto eol = remaining.find('\n', pos);
-            if (eol == std::string_view::npos) { done = true; return; }
+            if (eol == std::string_view::npos) {
+                done = true;
+                return;
+            }
             remaining = remaining.substr(eol + 1);
             pos = remaining.find_first_not_of(" \t\r\n");
         }
@@ -513,12 +645,66 @@ struct pgn::import_stream::impl {
             done = true;
             return;
         }
-        remaining      = remaining.substr(pos);
-        current_offset = static_cast<std::size_t>(remaining.data() - src.data());
+        remaining = remaining.substr(pos);
+        current_offset =
+            static_cast<std::size_t>(remaining.data() - src.data());
 
         auto [slice, rest] = pgn_split_game(remaining);
         remaining = rest;
-        current   = iscan_parse_one(slice);
+        current = iscan_parse_one(slice);
+    }
+
+    void advance_input()
+    {
+        owned_buf = std::move(pending);
+        pending.clear();
+        current_offset = pending_offset;
+
+        for (;;) {
+            auto pos = owned_buf.find_first_not_of(" \t\r\n");
+            while (pos != std::string::npos && owned_buf[pos] == '%') {
+                auto const eol = owned_buf.find('\n', pos);
+                if (eol == std::string::npos) {
+                    break;
+                }
+                pos = owned_buf.find_first_not_of(" \t\r\n", eol + 1U);
+            }
+            if (pos != std::string::npos && pos > 0U) {
+                pending_offset += pos;
+                owned_buf.erase(0, pos);
+                current_offset = pending_offset;
+            }
+
+            auto const [slice, rest] = pgn_split_game(owned_buf);
+            if (!rest.empty()) {
+                auto const rest_offset =
+                    static_cast<std::size_t>(rest.data() - owned_buf.data());
+                pending.assign(rest);
+                pending_offset += rest_offset;
+                current = iscan_parse_one(slice);
+                return;
+            }
+
+            auto chunk = std::string(buffer_size, '\0');
+            input->read(chunk.data(),
+                        static_cast<std::streamsize>(chunk.size()));
+            auto const read_count = input->gcount();
+            if (read_count > 0) {
+                owned_buf.append(chunk.data(),
+                                 static_cast<std::size_t>(read_count));
+                continue;
+            }
+            if (input->bad()) {
+                current = tl::unexpected(parse_error::file_not_found);
+                return;
+            }
+            if (owned_buf.empty()) {
+                done = true;
+                return;
+            }
+            current = iscan_parse_one(owned_buf);
+            return;
+        }
     }
 };
 
@@ -531,7 +717,10 @@ pgn::import_stream::import_stream(std::filesystem::path const& path)
         return;
     }
     auto pos = f.tellg();
-    if (pos < 0) { impl_->current = tl::unexpected(parse_error::file_not_found); return; }
+    if (pos < 0) {
+        impl_->current = tl::unexpected(parse_error::file_not_found);
+        return;
+    }
     auto size = static_cast<std::size_t>(pos);
     impl_->owned_buf.resize(size);
     f.seekg(0);
@@ -539,7 +728,7 @@ pgn::import_stream::import_stream(std::filesystem::path const& path)
         impl_->current = tl::unexpected(parse_error::file_not_found);
         return;
     }
-    impl_->src       = impl_->owned_buf;
+    impl_->src = impl_->owned_buf;
     impl_->remaining = impl_->owned_buf;
     impl_->advance();
 }
@@ -547,18 +736,31 @@ pgn::import_stream::import_stream(std::filesystem::path const& path)
 pgn::import_stream::import_stream(std::string_view input)
     : impl_(std::make_unique<impl>())
 {
-    impl_->src       = input;
+    impl_->src = input;
     impl_->remaining = input;
     impl_->advance();
 }
 
-pgn::import_stream::~import_stream()                                    = default;
-pgn::import_stream::import_stream(import_stream&&) noexcept             = default;
-pgn::import_stream& pgn::import_stream::operator=(import_stream&&) noexcept = default;
+pgn::import_stream::import_stream(std::istream& input, std::size_t buffer_size)
+    : impl_(std::make_unique<impl>())
+{
+    if (buffer_size == 0U) {
+        impl_->current = tl::unexpected(parse_error::syntax_error);
+        return;
+    }
+    impl_->input = &input;
+    impl_->buffer_size = buffer_size;
+    impl_->advance();
+}
+
+pgn::import_stream::~import_stream() = default;
+pgn::import_stream::import_stream(import_stream&&) noexcept = default;
+pgn::import_stream& pgn::import_stream::operator=(import_stream&&) noexcept =
+    default;
 
 pgn::import_stream::iterator pgn::import_stream::begin()
 {
-    return iterator{impl_.get()};
+    return iterator {impl_.get()};
 }
 
 pgn::import_stream::iterator::reference
@@ -579,7 +781,8 @@ pgn::import_stream::iterator& pgn::import_stream::iterator::operator++()
     return *this;
 }
 
-bool pgn::import_stream::iterator::operator==(std::default_sentinel_t) const noexcept
+bool pgn::import_stream::iterator::operator==(
+    std::default_sentinel_t) const noexcept
 {
     return impl_ == nullptr || impl_->done;
 }

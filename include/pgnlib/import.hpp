@@ -1,7 +1,8 @@
 #ifndef PGNLIB_IMPORT_HPP
 #define PGNLIB_IMPORT_HPP
 
-// ── Import-oriented streaming API ─────────────────────────────────────────────
+// ── Import-oriented streaming API
+// ─────────────────────────────────────────────
 //
 // import_stream is a lower-allocation alternative to game_stream for consumers
 // that process moves incrementally and do not need the full pgn::game object.
@@ -11,7 +12,8 @@
 //     the source buffer — no heap allocation for string data.
 //   • Tag values are raw bytes between the outer quotes; backslash escape
 //     sequences (e.g. \") appear verbatim and are NOT decoded.  Callers that
-//     need canonical values should unescape manually or use game_stream instead.
+//     need canonical values should unescape manually or use game_stream
+//     instead.
 //   • Only the main line is produced.  Variations, comments, and NAGs are
 //     consumed and silently discarded, keeping parsing cost proportional to the
 //     mainline length.
@@ -21,6 +23,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <iosfwd>
 #include <iterator>
 #include <memory>
 #include <string_view>
@@ -30,75 +33,88 @@
 
 #include "pgnlib/pgnlib_export.hpp"
 #include "pgnlib/types.hpp"
-// parse_error is defined in types.hpp (shared between pgnlib.hpp and import.hpp)
+// parse_error is defined in types.hpp (shared between pgnlib.hpp and
+// import.hpp)
 
-namespace pgn {
+namespace pgn
+{
 
-struct PGNLIB_EXPORT import_tag {
+struct PGNLIB_EXPORT import_tag
+{
     std::string_view key;
     std::string_view value;  // raw bytes — backslash escapes NOT decoded
 };
 
-struct PGNLIB_EXPORT import_move {
-    int              number;  // 0 when no explicit move-number token present
-    std::string_view san;     // e.g. "e4", "Nf3", "O-O", "--"
+struct PGNLIB_EXPORT import_move
+{
+    int number;  // 0 when no explicit move-number token present
+    std::string_view san;  // e.g. "e4", "Nf3", "O-O", "--"
 };
 
-struct PGNLIB_EXPORT import_game {
-    std::vector<import_tag>  tags;
+struct PGNLIB_EXPORT import_game
+{
+    std::vector<import_tag> tags;
     std::vector<import_move> moves;
-    pgn::result              result{pgn::result::unknown};
+    pgn::result result {pgn::result::unknown};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-class PGNLIB_EXPORT import_stream {
+class PGNLIB_EXPORT import_stream
+{
     struct impl;
 
-public:
+  public:
     // File overload: reads the whole file into an internal buffer.
     explicit import_stream(std::filesystem::path const& path);
-    // String_view overload: borrows the caller's buffer (must outlive the stream).
+    // String_view overload: borrows the caller's buffer (must outlive the
+    // stream).
     explicit import_stream(std::string_view input);
+    explicit import_stream(std::istream& input,
+                           std::size_t buffer_size = 64U * 1024U);
 
     ~import_stream();
     import_stream(import_stream&&) noexcept;
     import_stream& operator=(import_stream&&) noexcept;
 
-    import_stream(import_stream const&)            = delete;
+    import_stream(import_stream const&) = delete;
     import_stream& operator=(import_stream const&) = delete;
 
-    struct PGNLIB_EXPORT iterator {
-        using value_type        = tl::expected<import_game, parse_error>;
-        using difference_type   = std::ptrdiff_t;
+    struct PGNLIB_EXPORT iterator
+    {
+        using value_type = tl::expected<import_game, parse_error>;
+        using difference_type = std::ptrdiff_t;
         using iterator_category = std::input_iterator_tag;
-        using pointer           = value_type*;
-        using reference         = value_type&;
+        using pointer = value_type*;
+        using reference = value_type&;
 
         iterator() = default;
 
-        reference   operator*()  noexcept;
-        pointer     operator->() noexcept;
-        iterator&   operator++();
-        void        operator++(int) { ++(*this); }
-        bool        operator==(std::default_sentinel_t) const noexcept;
+        reference operator*() noexcept;
+        pointer operator->() noexcept;
+        iterator& operator++();
+        void operator++(int) { ++(*this); }
+        bool operator==(std::default_sentinel_t) const noexcept;
 
         // Byte offset of the current game's opening '[' in the source buffer.
         std::size_t byte_offset() const noexcept;
 
-    private:
+      private:
         friend class import_stream;
         impl* impl_ = nullptr;
-        explicit iterator(impl* p) noexcept : impl_(p) {}
+        explicit iterator(impl* p) noexcept
+            : impl_(p)
+        {
+        }
     };
 
     iterator begin();
     std::default_sentinel_t end() const noexcept { return {}; }
 
-private:
+  private:
     std::unique_ptr<impl> impl_;
 };
 
-} // namespace pgn
+}  // namespace pgn
 
-#endif // PGNLIB_IMPORT_HPP
+#endif  // PGNLIB_IMPORT_HPP
