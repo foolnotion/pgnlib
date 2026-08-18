@@ -1,5 +1,8 @@
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -822,6 +825,184 @@ TEST_CASE("import_stream - result tokens", "[import]")
     CHECK(check("0-1",     pgn::result::black));
     CHECK(check("1/2-1/2", pgn::result::draw));
     CHECK(check("*",       pgn::result::unknown));
+}
+
+TEST_CASE("import_stream - istream overload streams all games", "[import]")
+{
+    // Views are only valid until the iterator next advances (see import.hpp);
+    // assert on each game inside the loop body, not after it.
+    std::istringstream input{std::string{two_games_pgn}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input}) {
+        REQUIRE(eg.has_value());
+        ++count;
+        if (count == 1) {
+            CHECK(eg->tags[0].value == "Game 1");
+            CHECK(eg->result == pgn::result::white);
+        } else {
+            CHECK(eg->tags[0].value == "Game 2");
+            CHECK(eg->result == pgn::result::black);
+        }
+    }
+    CHECK(count == 2);
+}
+
+TEST_CASE("import_stream - istream overload with tiny buffer_size matches whole-buffer parse", "[import]")
+{
+    // 32-byte buffer forces dozens of refills within this ~1.8KB game.
+    std::ifstream file{zukertort_path, std::ios::binary};
+    REQUIRE(file.is_open());
+
+    int count = 0;
+    for (auto& eg : pgn::import_stream{file, 32U}) {
+        REQUIRE(eg.has_value());
+        ++count;
+        CHECK(eg->result == pgn::result::black);
+        REQUIRE(eg->moves.size() == 76);
+        CHECK(eg->moves[0].number == 1);
+        CHECK(eg->moves[0].san == "d4");
+        CHECK(eg->moves[14].san == "O-O");
+        CHECK(eg->moves[15].san == "O-O");
+        REQUIRE(eg->tags.size() == 9);
+        CHECK(eg->tags[4].key   == "White");
+        CHECK(eg->tags[4].value == "Zukertort, Johannes");
+    }
+    CHECK(count == 1);
+}
+
+TEST_CASE("import_stream - istream overload handles a comment/variation spanning a chunk boundary", "[import]")
+{
+    // pgn_split_game re-scans owned_buf from position 0 each refill, so a
+    // boundary-looking line inside a comment or variation should never cause
+    // a false split. Fake "[Event" line inside braces exercises exactly that.
+    constexpr std::string_view pgn = R"([Event "Game 1"]
+[Site "?"][Date "?"][Round "1"]
+[White "A"][Black "B"][Result "1-0"]
+
+1. e4 {a comment long enough to span several 16-byte refills, containing a
+
+fake boundary line: [Event "not a real game"] that must not split the
+stream mid-comment} e5 2. Nf3 (2. Nc3 Nc6 (2... d6 3. d4) 3. Bb5) Nc6 3. Bb5 1-0
+
+[Event "Game 2"]
+[Site "?"][Date "?"][Round "2"]
+[White "C"][Black "D"][Result "0-1"]
+
+1. d4 0-1
+)";
+    std::istringstream input{std::string{pgn}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 16U}) {
+        REQUIRE(eg.has_value());
+        ++count;
+        if (count == 1) {
+            CHECK(eg->result == pgn::result::white);
+            REQUIRE(eg->moves.size() == 5);
+            CHECK(eg->moves[0].san == "e4");
+            CHECK(eg->moves[1].san == "e5");
+            CHECK(eg->moves[2].san == "Nf3");
+            CHECK(eg->moves[3].san == "Nc6");
+            CHECK(eg->moves[4].san == "Bb5");
+        } else {
+            CHECK(eg->result == pgn::result::black);
+            REQUIRE(eg->moves.size() == 1);
+            CHECK(eg->moves[0].san == "d4");
+        }
+    }
+    CHECK(count == 2);
+}
+
+TEST_CASE("import_stream - istream overload byte_offset tracks stream position across refills", "[import]")
+{
+    std::istringstream input{std::string{two_games_pgn}};
+    auto stream = pgn::import_stream{input, 8U};
+    auto it = stream.begin();
+    REQUIRE(it != std::default_sentinel);
+    CHECK(it.byte_offset() == two_games_pgn.find("[Event \"Game 1\""));
+    ++it;
+    REQUIRE(it != std::default_sentinel);
+    CHECK(it.byte_offset() == two_games_pgn.find("[Event \"Game 2\""));
+    ++it;
+    CHECK(it == std::default_sentinel);
+}
+
+TEST_CASE("import_stream - istream overload malformed game recovery", "[import]")
+{
+    // Assert inside the loop body; see "streams all games" test above.
+    std::istringstream input{std::string{three_games_bad_middle}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 16U}) {
+        ++count;
+        if (count == 1) {
+            REQUIRE(eg.has_value());
+            CHECK(eg->tags[0].value == "Good 1");
+        } else if (count == 2) {
+            REQUIRE_FALSE(eg.has_value());
+            CHECK(eg.error() == pgn::parse_error::syntax_error);
+        } else {
+            REQUIRE(eg.has_value());
+            CHECK(eg->tags[0].value == "Good 2");
+        }
+    }
+    CHECK(count == 3);
+}
+
+TEST_CASE("import_stream - istream overload rejects zero buffer_size", "[import]")
+{
+    std::istringstream input{std::string{two_games_pgn}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 0U}) {
+        ++count;
+        REQUIRE_FALSE(eg.has_value());
+        CHECK(eg.error() == pgn::parse_error::syntax_error);
+    }
+    CHECK(count == 1);
+}
+
+TEST_CASE("import_stream - istream overload yields nothing for an empty stream", "[import]")
+{
+    std::istringstream input{std::string{}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 8U}) {
+        (void)eg;
+        ++count;
+    }
+    CHECK(count == 0);
+}
+
+TEST_CASE("import_stream - istream overload yields nothing for a game-free stream", "[import]")
+{
+    // Regression test: the EOF branch used to hand any non-empty leftover
+    // buffer to iscan_parse_one unconditionally, so a stream containing only
+    // whitespace or a %-comment (no game at all) produced a spurious
+    // syntax_error, unlike the path/string_view overloads on the same input.
+    for (auto const* pgn : {"% exported by tool\n", "   \n"}) {
+        std::istringstream input{std::string{pgn}};
+        int count = 0;
+        for (auto& eg : pgn::import_stream{input, 8U}) {
+            (void)eg;
+            ++count;
+        }
+        CHECK(count == 0);
+    }
+}
+
+TEST_CASE("import_stream - istream overload terminates on a bad stream instead of looping forever", "[import]")
+{
+    // Regression test for an infinite loop on a bad stream; count is capped
+    // so a regression fails loudly instead of hanging the suite.
+    std::istringstream input{std::string{"[Event \"x\"]\n\n1. e4 *\n"}};
+    input.setstate(std::ios::badbit);
+
+    int count = 0;
+    constexpr int max_iterations = 10;
+    for (auto& eg : pgn::import_stream{input, 8U}) {
+        REQUIRE_FALSE(eg.has_value());
+        CHECK(eg.error() == pgn::parse_error::file_not_found);
+        ++count;
+        REQUIRE(count <= max_iterations);
+    }
+    CHECK(count == 1);
 }
 
 TEST_CASE("100K synthetic games parsed under 10 seconds", "[.][throughput]")

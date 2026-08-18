@@ -17,10 +17,13 @@
 //     mainline length.
 //
 // String_view lifetime: all views are valid as long as the import_stream
-// (or the string_view passed to its constructor) is alive.
+// (or the string_view passed to its constructor) is alive. For the
+// std::istream overload, views are valid only until the next operator++
+// (each refill can relocate the internal buffer).
 
 #include <cstddef>
 #include <filesystem>
+#include <iosfwd>
 #include <iterator>
 #include <memory>
 #include <string_view>
@@ -60,6 +63,9 @@ public:
     explicit import_stream(std::filesystem::path const& path);
     // String_view overload: borrows the caller's buffer (must outlive the stream).
     explicit import_stream(std::string_view input);
+    // Stream overload: reads incrementally in buffer_size chunks, bounding
+    // peak memory instead of loading the whole input. input must outlive it.
+    explicit import_stream(std::istream& input, std::size_t buffer_size = std::size_t{64} * 1024U);
 
     ~import_stream();
     import_stream(import_stream&&) noexcept;
