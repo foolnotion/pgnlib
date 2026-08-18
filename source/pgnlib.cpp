@@ -577,7 +577,14 @@ struct pgn::import_stream::impl {
                 continue;
             }
             if (input->bad()) {
+                // Sever the stream pointer so the *next* advance() call falls
+                // through to the in-memory branch above with empty
+                // remaining/src, which sets done without touching current
+                // again -- the same one-error-then-stop pattern the
+                // path-constructor's open failure already relies on (see
+                // import_stream(path) below and the "file_not_found" test).
                 current = tl::unexpected(parse_error::file_not_found);
+                input   = nullptr;
                 return;
             }
             // EOF: no more '[Event' boundary will ever follow, so the whole

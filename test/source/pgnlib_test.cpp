@@ -923,6 +923,41 @@ TEST_CASE("import_stream - istream overload rejects zero buffer_size", "[import]
     CHECK(items[0].error() == pgn::parse_error::syntax_error);
 }
 
+TEST_CASE("import_stream - istream overload yields nothing for an empty stream", "[import]")
+{
+    std::istringstream input{std::string{}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 8U}) {
+        (void)eg;
+        ++count;
+    }
+    CHECK(count == 0);
+}
+
+TEST_CASE("import_stream - istream overload terminates on a bad stream instead of looping forever", "[import]")
+{
+    // Regression test: advance_input() used to leave `done` unset when
+    // input->bad(), so a range-for loop never terminated (operator++ kept
+    // re-entering the same dead read on an already-bad stream). The fix
+    // severs the impl's stream pointer once the bad-stream error has been
+    // yielded, so the following advance() call takes the in-memory branch
+    // (empty remaining) and sets done. This test times out via Catch2's own
+    // iteration cap if the fix regresses, rather than hanging the suite
+    // outright, by capping the loop itself.
+    std::istringstream input{std::string{"[Event \"x\"]\n\n1. e4 *\n"}};
+    input.setstate(std::ios::badbit);
+
+    int count = 0;
+    constexpr int max_iterations = 10;
+    for (auto& eg : pgn::import_stream{input, 8U}) {
+        REQUIRE_FALSE(eg.has_value());
+        CHECK(eg.error() == pgn::parse_error::file_not_found);
+        ++count;
+        REQUIRE(count <= max_iterations);
+    }
+    CHECK(count == 1);
+}
+
 TEST_CASE("100K synthetic games parsed under 10 seconds", "[.][throughput]")
 {
     static constexpr int num_games = 100'000;
