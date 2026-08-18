@@ -18,9 +18,8 @@
 //
 // String_view lifetime: all views are valid as long as the import_stream
 // (or the string_view passed to its constructor) is alive. For the
-// std::istream overload, views are valid only until the next call to
-// begin()'s iterator::operator++ — each refill can relocate the internal
-// buffer, so callers must finish using one game's views before advancing.
+// std::istream overload, views are valid only until the next operator++
+// (each refill can relocate the internal buffer).
 
 #include <cstddef>
 #include <filesystem>
@@ -64,9 +63,8 @@ public:
     explicit import_stream(std::filesystem::path const& path);
     // String_view overload: borrows the caller's buffer (must outlive the stream).
     explicit import_stream(std::string_view input);
-    // Stream overload: reads input incrementally in buffer_size chunks, so peak
-    // memory is bounded by buffer_size plus the largest single game's raw text
-    // rather than by the total input size. input must outlive the import_stream.
+    // Stream overload: reads incrementally in buffer_size chunks, bounding
+    // peak memory instead of loading the whole input. input must outlive it.
     explicit import_stream(std::istream& input, std::size_t buffer_size = std::size_t{64} * 1024U);
 
     ~import_stream();

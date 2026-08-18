@@ -530,14 +530,10 @@ struct pgn::import_stream::impl {
         current   = iscan_parse_one(slice);
     }
 
-    // Incremental path for the std::istream overload: owned_buf holds only the
-    // still-unconsumed tail (at most one refill's worth past the last complete
-    // game boundary found), so peak memory is bounded by buffer_size plus the
-    // largest single game's raw text rather than by the total input size.
-    // consumed_prefix defers the erase of the previous game's bytes to the
-    // start of the *next* advance_input() call, so the string_views in
-    // `current` (which alias into owned_buf) stay valid until the caller
-    // advances the iterator again.
+    // Incremental path for the istream overload: owned_buf holds only the
+    // unconsumed tail, bounding memory. consumed_prefix defers erasing the
+    // previous game's bytes to the next call, so current's views stay valid
+    // until the caller advances again.
     void advance_input() {
         if (consumed_prefix > 0U) {
             owned_buf.erase(0, consumed_prefix);
@@ -577,12 +573,10 @@ struct pgn::import_stream::impl {
                 continue;
             }
             if (input->bad()) {
-                // Sever the stream pointer so the *next* advance() call falls
-                // through to the in-memory branch above with empty
-                // remaining/src, which sets done without touching current
-                // again -- the same one-error-then-stop pattern the
-                // path-constructor's open failure already relies on (see
-                // import_stream(path) below and the "file_not_found" test).
+                // Sever input so the next advance() takes the in-memory
+                // branch (empty remaining) and sets done -- same
+                // one-error-then-stop pattern as the path constructor's
+                // open failure.
                 current = tl::unexpected(parse_error::file_not_found);
                 input   = nullptr;
                 return;

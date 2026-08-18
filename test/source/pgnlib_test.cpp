@@ -829,10 +829,8 @@ TEST_CASE("import_stream - result tokens", "[import]")
 
 TEST_CASE("import_stream - istream overload streams all games", "[import]")
 {
-    // The incremental reader erases consumed bytes from its internal buffer
-    // on each refill, so (per import.hpp's documented lifetime) a game's
-    // string_views are only valid until the iterator next advances. Assert on
-    // each game inside the loop body, before that game's fields are freed.
+    // Views are only valid until the iterator next advances (see import.hpp);
+    // assert on each game inside the loop body, not after it.
     std::istringstream input{std::string{two_games_pgn}};
     int count = 0;
     for (auto& eg : pgn::import_stream{input}) {
@@ -851,10 +849,7 @@ TEST_CASE("import_stream - istream overload streams all games", "[import]")
 
 TEST_CASE("import_stream - istream overload with tiny buffer_size matches whole-buffer parse", "[import]")
 {
-    // buffer_size forces dozens of refills within this single ~1.8KB game,
-    // exercising the incremental-refill path (advance_input's inner loop)
-    // rather than completing on the first read. Assert inside the loop body
-    // per the views' documented lifetime (see previous test's comment).
+    // 32-byte buffer forces dozens of refills within this ~1.8KB game.
     std::ifstream file{zukertort_path, std::ios::binary};
     REQUIRE(file.is_open());
 
@@ -877,14 +872,9 @@ TEST_CASE("import_stream - istream overload with tiny buffer_size matches whole-
 
 TEST_CASE("import_stream - istream overload handles a comment/variation spanning a chunk boundary", "[import]")
 {
-    // pgn_split_game re-scans the *entire* accumulated owned_buf from
-    // position 0 on every refill (its in_brace/in_quote state is local to
-    // each call, not carried across refills), so a boundary marker inside a
-    // brace comment or a nested variation should never cause a false split
-    // regardless of where a chunk boundary happens to land. This exercises
-    // that with a comment containing a fake "[Event" line (which would be a
-    // real boundary if brace-tracking were lost) and a nested variation, via
-    // a buffer_size small enough to force dozens of refills within game 1.
+    // pgn_split_game re-scans owned_buf from position 0 each refill, so a
+    // boundary-looking line inside a comment or variation should never cause
+    // a false split. Fake "[Event" line inside braces exercises exactly that.
     constexpr std::string_view pgn = R"([Event "Game 1"]
 [Site "?"][Date "?"][Round "1"]
 [White "A"][Black "B"][Result "1-0"]
@@ -937,8 +927,7 @@ TEST_CASE("import_stream - istream overload byte_offset tracks stream position a
 
 TEST_CASE("import_stream - istream overload malformed game recovery", "[import]")
 {
-    // Assert inside the loop body per the incremental reader's documented
-    // view lifetime (see "streams all games" test above).
+    // Assert inside the loop body; see "streams all games" test above.
     std::istringstream input{std::string{three_games_bad_middle}};
     int count = 0;
     for (auto& eg : pgn::import_stream{input, 16U}) {
@@ -982,14 +971,8 @@ TEST_CASE("import_stream - istream overload yields nothing for an empty stream",
 
 TEST_CASE("import_stream - istream overload terminates on a bad stream instead of looping forever", "[import]")
 {
-    // Regression test: advance_input() used to leave `done` unset when
-    // input->bad(), so a range-for loop never terminated (operator++ kept
-    // re-entering the same dead read on an already-bad stream). The fix
-    // severs the impl's stream pointer once the bad-stream error has been
-    // yielded, so the following advance() call takes the in-memory branch
-    // (empty remaining) and sets done. This test times out via Catch2's own
-    // iteration cap if the fix regresses, rather than hanging the suite
-    // outright, by capping the loop itself.
+    // Regression test for an infinite loop on a bad stream; count is capped
+    // so a regression fails loudly instead of hanging the suite.
     std::istringstream input{std::string{"[Event \"x\"]\n\n1. e4 *\n"}};
     input.setstate(std::ios::badbit);
 
