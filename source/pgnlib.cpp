@@ -499,6 +499,7 @@ struct pgn::import_stream::impl {
     std::string_view src;
     std::string_view remaining;
     std::istream*    input = nullptr;
+    std::string      chunk;  // reused refill scratch buffer, sized to buffer_size
     std::size_t      buffer_offset = 0;
     std::size_t      consumed_prefix = 0;
     std::size_t      buffer_size = 0;
@@ -565,7 +566,6 @@ struct pgn::import_stream::impl {
                 return;
             }
 
-            auto chunk = std::string(buffer_size, '\0');
             input->read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
             auto const read_count = input->gcount();
             if (read_count > 0) {
@@ -581,9 +581,10 @@ struct pgn::import_stream::impl {
                 input   = nullptr;
                 return;
             }
-            // EOF: no more '[Event' boundary will ever follow, so the whole
-            // remaining buffer is the last game.
-            if (owned_buf.empty()) {
+            // EOF: no more '[Event' boundary will ever follow. Nothing left
+            // resembling a game start (as opposed to trailing junk after the
+            // whitespace/%-comment skip above) means there's no final game.
+            if (pos == std::string::npos || owned_buf[pos] != '[') {
                 done = true;
                 return;
             }
@@ -633,6 +634,7 @@ pgn::import_stream::import_stream(std::istream& input, std::size_t buffer_size)
     }
     impl_->input       = &input;
     impl_->buffer_size = buffer_size;
+    impl_->chunk.resize(buffer_size);
     impl_->advance();
 }
 

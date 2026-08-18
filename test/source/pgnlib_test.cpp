@@ -880,6 +880,7 @@ TEST_CASE("import_stream - istream overload handles a comment/variation spanning
 [White "A"][Black "B"][Result "1-0"]
 
 1. e4 {a comment long enough to span several 16-byte refills, containing a
+
 fake boundary line: [Event "not a real game"] that must not split the
 stream mid-comment} e5 2. Nf3 (2. Nc3 Nc6 (2... d6 3. d4) 3. Bb5) Nc6 3. Bb5 1-0
 
@@ -949,13 +950,13 @@ TEST_CASE("import_stream - istream overload malformed game recovery", "[import]"
 TEST_CASE("import_stream - istream overload rejects zero buffer_size", "[import]")
 {
     std::istringstream input{std::string{two_games_pgn}};
-    std::vector<tl::expected<pgn::import_game, pgn::parse_error>> items;
-    for (auto& eg : pgn::import_stream{input, 0U})
-        items.push_back(eg);
-
-    REQUIRE(items.size() == 1);
-    REQUIRE_FALSE(items[0].has_value());
-    CHECK(items[0].error() == pgn::parse_error::syntax_error);
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 0U}) {
+        ++count;
+        REQUIRE_FALSE(eg.has_value());
+        CHECK(eg.error() == pgn::parse_error::syntax_error);
+    }
+    CHECK(count == 1);
 }
 
 TEST_CASE("import_stream - istream overload yields nothing for an empty stream", "[import]")
@@ -967,6 +968,23 @@ TEST_CASE("import_stream - istream overload yields nothing for an empty stream",
         ++count;
     }
     CHECK(count == 0);
+}
+
+TEST_CASE("import_stream - istream overload yields nothing for a game-free stream", "[import]")
+{
+    // Regression test: the EOF branch used to hand any non-empty leftover
+    // buffer to iscan_parse_one unconditionally, so a stream containing only
+    // whitespace or a %-comment (no game at all) produced a spurious
+    // syntax_error, unlike the path/string_view overloads on the same input.
+    for (auto const* pgn : {"% exported by tool\n", "   \n"}) {
+        std::istringstream input{std::string{pgn}};
+        int count = 0;
+        for (auto& eg : pgn::import_stream{input, 8U}) {
+            (void)eg;
+            ++count;
+        }
+        CHECK(count == 0);
+    }
 }
 
 TEST_CASE("import_stream - istream overload terminates on a bad stream instead of looping forever", "[import]")
