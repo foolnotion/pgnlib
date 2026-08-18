@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <istream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -497,11 +498,19 @@ struct pgn::import_stream::impl {
     std::string      owned_buf;
     std::string_view src;
     std::string_view remaining;
+    std::istream*    input = nullptr;
+    std::size_t      buffer_offset = 0;
+    std::size_t      consumed_prefix = 0;
+    std::size_t      buffer_size = 0;
     std::size_t      current_offset{0};
     tl::expected<import_game, parse_error> current;
     bool done = false;
 
     void advance() {
+        if (input != nullptr) {
+            advance_input();
+            return;
+        }
         auto pos = remaining.find_first_not_of(" \t\r\n");
         while (pos != std::string_view::npos && remaining[pos] == '%') {
             auto eol = remaining.find('\n', pos);
@@ -519,6 +528,68 @@ struct pgn::import_stream::impl {
         auto [slice, rest] = pgn_split_game(remaining);
         remaining = rest;
         current   = iscan_parse_one(slice);
+    }
+
+    // Incremental path for the std::istream overload: owned_buf holds only the
+    // still-unconsumed tail (at most one refill's worth past the last complete
+    // game boundary found), so peak memory is bounded by buffer_size plus the
+    // largest single game's raw text rather than by the total input size.
+    // consumed_prefix defers the erase of the previous game's bytes to the
+    // start of the *next* advance_input() call, so the string_views in
+    // `current` (which alias into owned_buf) stay valid until the caller
+    // advances the iterator again.
+    void advance_input() {
+        if (consumed_prefix > 0U) {
+            owned_buf.erase(0, consumed_prefix);
+            buffer_offset += consumed_prefix;
+            consumed_prefix = 0;
+        }
+        current_offset = buffer_offset;
+
+        for (;;) {
+            auto pos = owned_buf.find_first_not_of(" \t\r\n");
+            while (pos != std::string::npos && owned_buf[pos] == '%') {
+                auto const eol = owned_buf.find('\n', pos);
+                if (eol == std::string::npos) {
+                    break;
+                }
+                pos = owned_buf.find_first_not_of(" \t\r\n", eol + 1U);
+            }
+            if (pos != std::string::npos && pos > 0U) {
+                buffer_offset += pos;
+                owned_buf.erase(0, pos);
+                current_offset = buffer_offset;
+            }
+
+            auto const [slice, rest] = pgn_split_game(owned_buf);
+            if (!rest.empty()) {
+                auto const rest_offset = static_cast<std::size_t>(rest.data() - owned_buf.data());
+                consumed_prefix = rest_offset;
+                current         = iscan_parse_one(slice);
+                return;
+            }
+
+            auto chunk = std::string(buffer_size, '\0');
+            input->read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+            auto const read_count = input->gcount();
+            if (read_count > 0) {
+                owned_buf.append(chunk.data(), static_cast<std::size_t>(read_count));
+                continue;
+            }
+            if (input->bad()) {
+                current = tl::unexpected(parse_error::file_not_found);
+                return;
+            }
+            // EOF: no more '[Event' boundary will ever follow, so the whole
+            // remaining buffer is the last game.
+            if (owned_buf.empty()) {
+                done = true;
+                return;
+            }
+            current         = iscan_parse_one(owned_buf);
+            consumed_prefix = owned_buf.size();
+            return;
+        }
     }
 };
 
@@ -549,6 +620,18 @@ pgn::import_stream::import_stream(std::string_view input)
 {
     impl_->src       = input;
     impl_->remaining = input;
+    impl_->advance();
+}
+
+pgn::import_stream::import_stream(std::istream& input, std::size_t buffer_size)
+    : impl_(std::make_unique<impl>())
+{
+    if (buffer_size == 0U) {
+        impl_->current = tl::unexpected(parse_error::syntax_error);
+        return;
+    }
+    impl_->input       = &input;
+    impl_->buffer_size = buffer_size;
     impl_->advance();
 }
 

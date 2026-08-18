@@ -1,5 +1,8 @@
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -822,6 +825,102 @@ TEST_CASE("import_stream - result tokens", "[import]")
     CHECK(check("0-1",     pgn::result::black));
     CHECK(check("1/2-1/2", pgn::result::draw));
     CHECK(check("*",       pgn::result::unknown));
+}
+
+TEST_CASE("import_stream - istream overload streams all games", "[import]")
+{
+    // The incremental reader erases consumed bytes from its internal buffer
+    // on each refill, so (per import.hpp's documented lifetime) a game's
+    // string_views are only valid until the iterator next advances. Assert on
+    // each game inside the loop body, before that game's fields are freed.
+    std::istringstream input{std::string{two_games_pgn}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input}) {
+        REQUIRE(eg.has_value());
+        ++count;
+        if (count == 1) {
+            CHECK(eg->tags[0].value == "Game 1");
+            CHECK(eg->result == pgn::result::white);
+        } else {
+            CHECK(eg->tags[0].value == "Game 2");
+            CHECK(eg->result == pgn::result::black);
+        }
+    }
+    CHECK(count == 2);
+}
+
+TEST_CASE("import_stream - istream overload with tiny buffer_size matches whole-buffer parse", "[import]")
+{
+    // buffer_size forces dozens of refills within this single ~1.8KB game,
+    // exercising the incremental-refill path (advance_input's inner loop)
+    // rather than completing on the first read. Assert inside the loop body
+    // per the views' documented lifetime (see previous test's comment).
+    std::ifstream file{zukertort_path, std::ios::binary};
+    REQUIRE(file.is_open());
+
+    int count = 0;
+    for (auto& eg : pgn::import_stream{file, 32U}) {
+        REQUIRE(eg.has_value());
+        ++count;
+        CHECK(eg->result == pgn::result::black);
+        REQUIRE(eg->moves.size() == 76);
+        CHECK(eg->moves[0].number == 1);
+        CHECK(eg->moves[0].san == "d4");
+        CHECK(eg->moves[14].san == "O-O");
+        CHECK(eg->moves[15].san == "O-O");
+        REQUIRE(eg->tags.size() == 9);
+        CHECK(eg->tags[4].key   == "White");
+        CHECK(eg->tags[4].value == "Zukertort, Johannes");
+    }
+    CHECK(count == 1);
+}
+
+TEST_CASE("import_stream - istream overload byte_offset tracks stream position across refills", "[import]")
+{
+    std::istringstream input{std::string{two_games_pgn}};
+    auto stream = pgn::import_stream{input, 8U};
+    auto it = stream.begin();
+    REQUIRE(it != std::default_sentinel);
+    CHECK(it.byte_offset() == two_games_pgn.find("[Event \"Game 1\""));
+    ++it;
+    REQUIRE(it != std::default_sentinel);
+    CHECK(it.byte_offset() == two_games_pgn.find("[Event \"Game 2\""));
+    ++it;
+    CHECK(it == std::default_sentinel);
+}
+
+TEST_CASE("import_stream - istream overload malformed game recovery", "[import]")
+{
+    // Assert inside the loop body per the incremental reader's documented
+    // view lifetime (see "streams all games" test above).
+    std::istringstream input{std::string{three_games_bad_middle}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 16U}) {
+        ++count;
+        if (count == 1) {
+            REQUIRE(eg.has_value());
+            CHECK(eg->tags[0].value == "Good 1");
+        } else if (count == 2) {
+            REQUIRE_FALSE(eg.has_value());
+            CHECK(eg.error() == pgn::parse_error::syntax_error);
+        } else {
+            REQUIRE(eg.has_value());
+            CHECK(eg->tags[0].value == "Good 2");
+        }
+    }
+    CHECK(count == 3);
+}
+
+TEST_CASE("import_stream - istream overload rejects zero buffer_size", "[import]")
+{
+    std::istringstream input{std::string{two_games_pgn}};
+    std::vector<tl::expected<pgn::import_game, pgn::parse_error>> items;
+    for (auto& eg : pgn::import_stream{input, 0U})
+        items.push_back(eg);
+
+    REQUIRE(items.size() == 1);
+    REQUIRE_FALSE(items[0].has_value());
+    CHECK(items[0].error() == pgn::parse_error::syntax_error);
 }
 
 TEST_CASE("100K synthetic games parsed under 10 seconds", "[.][throughput]")
