@@ -55,7 +55,7 @@
 
               # deps
               catch2_3
-              lexy
+              foonathan-lexy
               nanobench
               tl-expected
             ];
@@ -70,7 +70,7 @@
             cmakeBuildType = "Release";
 
             propagatedBuildInputs = with pkgs; [
-              lexy
+              foonathan-lexy
               tl-expected
             ];
           };
