@@ -875,6 +875,52 @@ TEST_CASE("import_stream - istream overload with tiny buffer_size matches whole-
     CHECK(count == 1);
 }
 
+TEST_CASE("import_stream - istream overload handles a comment/variation spanning a chunk boundary", "[import]")
+{
+    // pgn_split_game re-scans the *entire* accumulated owned_buf from
+    // position 0 on every refill (its in_brace/in_quote state is local to
+    // each call, not carried across refills), so a boundary marker inside a
+    // brace comment or a nested variation should never cause a false split
+    // regardless of where a chunk boundary happens to land. This exercises
+    // that with a comment containing a fake "[Event" line (which would be a
+    // real boundary if brace-tracking were lost) and a nested variation, via
+    // a buffer_size small enough to force dozens of refills within game 1.
+    constexpr std::string_view pgn = R"([Event "Game 1"]
+[Site "?"][Date "?"][Round "1"]
+[White "A"][Black "B"][Result "1-0"]
+
+1. e4 {a comment long enough to span several 16-byte refills, containing a
+fake boundary line: [Event "not a real game"] that must not split the
+stream mid-comment} e5 2. Nf3 (2. Nc3 Nc6 (2... d6 3. d4) 3. Bb5) Nc6 3. Bb5 1-0
+
+[Event "Game 2"]
+[Site "?"][Date "?"][Round "2"]
+[White "C"][Black "D"][Result "0-1"]
+
+1. d4 0-1
+)";
+    std::istringstream input{std::string{pgn}};
+    int count = 0;
+    for (auto& eg : pgn::import_stream{input, 16U}) {
+        REQUIRE(eg.has_value());
+        ++count;
+        if (count == 1) {
+            CHECK(eg->result == pgn::result::white);
+            REQUIRE(eg->moves.size() == 5);
+            CHECK(eg->moves[0].san == "e4");
+            CHECK(eg->moves[1].san == "e5");
+            CHECK(eg->moves[2].san == "Nf3");
+            CHECK(eg->moves[3].san == "Nc6");
+            CHECK(eg->moves[4].san == "Bb5");
+        } else {
+            CHECK(eg->result == pgn::result::black);
+            REQUIRE(eg->moves.size() == 1);
+            CHECK(eg->moves[0].san == "d4");
+        }
+    }
+    CHECK(count == 2);
+}
+
 TEST_CASE("import_stream - istream overload byte_offset tracks stream position across refills", "[import]")
 {
     std::istringstream input{std::string{two_games_pgn}};
